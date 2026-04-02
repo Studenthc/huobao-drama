@@ -10,6 +10,8 @@ import { db, schema } from '../db/index.js'
 import { eq } from 'drizzle-orm'
 import { now } from '../utils/response.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import type { StudioRequestContext } from '../integrations/trendshort/index.js'
+import { finalizeStudioAction, refundStudioAction } from '../integrations/trendshort/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const STORAGE_ROOT = process.env.STORAGE_PATH || path.resolve(__dirname, '../../../data/static')
@@ -24,7 +26,15 @@ function toAbsPath(relativePath: string): string {
 /**
  * 拼接一集的所有合成镜头视频
  */
-export async function mergeEpisodeVideos(episodeId: number, dramaId: number): Promise<number> {
+export async function mergeEpisodeVideos(
+  episodeId: number,
+  dramaId: number,
+  studioMeta?: {
+    appProjectId?: string
+    appUserId?: string
+    studioAuthorizationId?: string | null
+  },
+): Promise<number> {
   const storyboards = db.select().from(schema.storyboards)
     .where(eq(schema.storyboards.episodeId, episodeId))
     .orderBy(schema.storyboards.storyboardNumber)
@@ -52,6 +62,9 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number): Pr
     model: 'ffmpeg-concat-h264-aac',
     status: 'processing',
     scenes: JSON.stringify(videos),
+    appProjectId: studioMeta?.appProjectId,
+    appUserId: studioMeta?.appUserId,
+    studioAuthorizationId: studioMeta?.studioAuthorizationId,
     createdAt: ts,
   }).run()
   const mergeId = Number(res.lastInsertRowid)
@@ -60,9 +73,7 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number): Pr
   doMerge(mergeId, episodeId, videos).catch(err => {
     logTaskError('MergeTask', 'episode-merge', { mergeId, episodeId, error: err.message })
     console.error(`[Merge] Failed:`, err)
-    db.update(schema.videoMerges)
-      .set({ status: 'failed', errorMsg: err.message })
-      .where(eq(schema.videoMerges.id, mergeId)).run()
+    void markMergeFailed(mergeId, err.message)
   })
 
   return mergeId
@@ -124,6 +135,58 @@ async function doMerge(mergeId: number, episodeId: number, videos: string[]) {
     .where(eq(schema.episodes.id, episodeId)).run()
 
   logTaskSuccess('MergeTask', 'episode-merge', { mergeId, episodeId, output: mergedRelative, duration, clips: videos.length })
+
+  const [record] = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, mergeId)).all()
+  if (record?.appProjectId && record.appUserId && record.studioAuthorizationId) {
+    const studioContext: StudioRequestContext = {
+      authType: 'service',
+      session: {
+        sub: record.appUserId,
+        workspace_id: record.appUserId,
+        project_id: record.appProjectId,
+        drama_id: record.dramaId || 0,
+        plan_id: null,
+        iss: 'app',
+        aud: 'studio',
+        exp: Math.floor(Date.now() / 1000) + 60,
+      },
+    }
+    await finalizeStudioAction(studioContext, record.studioAuthorizationId, {
+      merge_id: mergeId,
+      episode_id: episodeId,
+      drama_id: record.dramaId,
+      merged_url: mergedRelative,
+    })
+  }
+}
+
+async function markMergeFailed(mergeId: number, message: string) {
+  const [record] = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, mergeId)).all()
+  db.update(schema.videoMerges)
+    .set({ status: 'failed', errorMsg: message })
+    .where(eq(schema.videoMerges.id, mergeId)).run()
+
+  if (record?.appProjectId && record.appUserId && record.studioAuthorizationId) {
+    const studioContext: StudioRequestContext = {
+      authType: 'service',
+      session: {
+        sub: record.appUserId,
+        workspace_id: record.appUserId,
+        project_id: record.appProjectId,
+        drama_id: record.dramaId || 0,
+        plan_id: null,
+        iss: 'app',
+        aud: 'studio',
+        exp: Math.floor(Date.now() / 1000) + 60,
+      },
+    }
+    await refundStudioAction(studioContext, record.studioAuthorizationId, 'merge_generation_failed', {
+      merge_id: mergeId,
+      drama_id: record.dramaId,
+      episode_id: record.episodeId,
+      error: message,
+    })
+  }
 }
 
 function getVideoDuration(filePath: string): Promise<number> {

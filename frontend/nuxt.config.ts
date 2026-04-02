@@ -7,12 +7,17 @@ export default defineNuxtConfig({
   },
   app: {
     head: {
-      title: '火宝短剧',
+      title: 'TrendShort Studio',
       meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }],
       link: [
         { rel: 'icon', type: 'image/png', href: '/favicon.png' },
         { rel: 'shortcut icon', type: 'image/png', href: '/favicon.png' },
       ],
+    },
+  },
+  runtimeConfig: {
+    public: {
+      trendshortAppUrl: process.env.NUXT_PUBLIC_TRENDSHORT_APP_URL || 'http://127.0.0.1:3013',
     },
   },
   vite: {

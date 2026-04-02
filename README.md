@@ -1,4 +1,4 @@
-# 火宝短剧
+# TrendShort Studio
 
 基于 TypeScript 的 AI 短剧生产工作台。  
 当前开源版本覆盖了从剧集内容编写、AI 改写、角色场景提取、分镜生成，到图片生成、配音生成、视频生成、单镜头合成和整集拼接导出的完整流程。
@@ -18,6 +18,19 @@
 - 可视化工作台统一管理全流程
 
 本仓库是当前的 TypeScript 版本，不是旧的 Go 版本实现。
+
+## Fork Policy
+
+`trendshort-studio` 作为 `huobao-drama` 的长期可维护 fork 运行，默认只保留 TrendShort 所需的薄集成层：
+
+- SSO / Studio session
+- credits authorize / finalize / refund
+- return flow back to TrendShort
+- 品牌壳和语言承接
+- `storyshort-replica` 需要的稳定适配接口
+
+不要把 SaaS 控制台逻辑、SEO、项目库、营销信息架构继续堆进 Studio。  
+详细规则见 [FORK_STRATEGY.md](./FORK_STRATEGY.md)。
 
 ## 技术栈
 
@@ -156,6 +169,8 @@ npm install
 
 ```bash
 cp configs/config.example.yaml configs/config.yaml
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
 ```
 
 当前运行时的 provider 配置主要来自 Web 设置页数据库配置，但 `config.example.yaml` 仍然可作为本地参考。
@@ -180,7 +195,7 @@ npm run dev
 
 默认地址：
 
-- `http://localhost:3013`
+- `http://localhost:3023`
 
 开发模式下前端会代理：
 

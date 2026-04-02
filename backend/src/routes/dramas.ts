@@ -96,6 +96,21 @@ app.get('/stats', async (c) => {
   return success(c, { total: all.length, by_status: byStatus })
 })
 
+app.get('/:id/stats', async (c) => {
+  const id = Number(c.req.param('id'))
+  const [drama] = await db.select().from(schema.dramas).where(eq(schema.dramas.id, id))
+  if (!drama) return notFound(c, '剧本不存在')
+
+  const episodes = await db.select().from(schema.episodes).where(eq(schema.episodes.dramaId, id))
+  const videos = await db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.dramaId, id))
+
+  return success(c, {
+    total_episodes: episodes.length,
+    completed_episodes: episodes.filter((episode) => episode.status === 'completed' || !!episode.videoUrl).length,
+    total_videos: videos.filter((video) => video.status === 'completed').length,
+  })
+})
+
 // GET /dramas/:id - Get drama detail
 app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))

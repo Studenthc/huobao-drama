@@ -4,6 +4,7 @@ import { db, schema } from '../db/index.js'
 import { success, created, badRequest } from '../utils/response.js'
 import { generateVideo } from '../services/video-generation.js'
 import { logTaskError, logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { authorizeStudioAction, getStudioContext } from '../integrations/trendshort/index.js'
 
 const app = new Hono()
 
@@ -13,6 +14,7 @@ app.post('/', async (c) => {
   if (!body.prompt) return badRequest(c, 'prompt is required')
 
   try {
+    const studioContext = getStudioContext(c)
     let configId: number | undefined = body.config_id
     if (body.storyboard_id) {
       const [sb] = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, Number(body.storyboard_id))).all()
@@ -29,6 +31,12 @@ app.post('/', async (c) => {
       duration: body.duration,
     })
     logTaskPayload('VideoAPI', 'request body', body)
+    const authorization = await authorizeStudioAction(studioContext, 'video_generation', {
+      drama_id: body.drama_id,
+      storyboard_id: body.storyboard_id,
+      duration: body.duration,
+      reference_mode: body.reference_mode,
+    })
     const id = await generateVideo({
       storyboardId: body.storyboard_id,
       dramaId: body.drama_id,
@@ -42,6 +50,9 @@ app.post('/', async (c) => {
       duration: body.duration,
       aspectRatio: body.aspect_ratio,
       configId,
+      appProjectId: studioContext.session.project_id,
+      appUserId: studioContext.session.sub,
+      studioAuthorizationId: authorization?.authorizationId,
     })
 
     const [record] = db.select().from(schema.videoGenerations)

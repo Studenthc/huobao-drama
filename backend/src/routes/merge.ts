@@ -5,6 +5,7 @@ import { success, badRequest } from '../utils/response.js'
 import { mergeEpisodeVideos } from '../services/ffmpeg-merge.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { authorizeStudioAction, getStudioContext } from '../integrations/trendshort/index.js'
 
 const app = new Hono()
 
@@ -15,8 +16,17 @@ app.post('/episodes/:id/merge', async (c) => {
   if (!ep) return badRequest(c, 'Episode not found')
 
   try {
+    const studioContext = getStudioContext(c)
     logTaskStart('MergeAPI', 'episode-merge', { episodeId, dramaId: ep.dramaId })
-    const mergeId = await mergeEpisodeVideos(episodeId, ep.dramaId)
+    const authorization = await authorizeStudioAction(studioContext, 'merge_generation', {
+      drama_id: ep.dramaId,
+      episode_id: episodeId,
+    })
+    const mergeId = await mergeEpisodeVideos(episodeId, ep.dramaId, {
+      appProjectId: studioContext.session.project_id,
+      appUserId: studioContext.session.sub,
+      studioAuthorizationId: authorization?.authorizationId,
+    })
     logTaskSuccess('MergeAPI', 'episode-merge', { episodeId, mergeId })
     return success(c, { merge_id: mergeId, status: 'processing' })
   } catch (err: any) {

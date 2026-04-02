@@ -5,6 +5,12 @@ import { Hono } from 'hono'
 import { createAgent, validAgentTypes } from '../agents/index.js'
 import { success, badRequest } from '../utils/response.js'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import {
+  authorizeStudioAction,
+  finalizeStudioAction,
+  getStudioContext,
+  refundStudioAction,
+} from '../integrations/trendshort/index.js'
 
 const app = new Hono()
 
@@ -31,6 +37,8 @@ app.post('/:type/chat', async (c) => {
 
   const body = await c.req.json()
   const { message, drama_id, episode_id } = body
+  const studioContext = getStudioContext(c)
+  let authorizationId: string | null = null
 
   logTaskStart('Agent', agentType, {
     dramaId: drama_id,
@@ -53,6 +61,13 @@ app.post('/:type/chat', async (c) => {
   const startTime = performance.now()
 
   try {
+    const authorization = await authorizeStudioAction(studioContext, 'text_decomposition', {
+      agent_type: agentType,
+      drama_id,
+      episode_id,
+    })
+    authorizationId = authorization?.authorizationId || null
+
     const result = await agent.generate(
       [{ role: 'user', content: message }],
       { maxSteps: 20 },
@@ -79,6 +94,13 @@ app.post('/:type/chat', async (c) => {
       toolResults: normalizedToolResults.map((tr: any) => tr.toolName),
     })
     logTaskPayload('Agent', `${agentType} tool-results`, normalizedToolResults)
+    await finalizeStudioAction(studioContext, authorizationId, {
+      agent_type: agentType,
+      drama_id,
+      episode_id,
+      tool_calls: normalizedToolCalls.length,
+      tool_results: normalizedToolResults.length,
+    })
 
     return success(c, {
       type: 'done',
@@ -89,6 +111,12 @@ app.post('/:type/chat', async (c) => {
   } catch (err: any) {
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(1)
     logTaskError('Agent', agentType, { elapsedSeconds: elapsed, error: err.message })
+    await refundStudioAction(studioContext, authorizationId, 'text_decomposition_failed', {
+      agent_type: agentType,
+      drama_id,
+      episode_id,
+      error: err.message,
+    })
     console.error(err.stack || err)
     return badRequest(c, err.message || 'Agent execution failed')
   }

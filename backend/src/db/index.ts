@@ -11,6 +11,18 @@ const sqlite = new Database(DB_PATH, { timeout: 30000 })
 sqlite.pragma('journal_mode = WAL')
 sqlite.pragma('busy_timeout = 30000')
 
+function ensureColumn(tableName: string, columnName: string, definition: string) {
+  const tableExists = sqlite.prepare(
+    `SELECT 1 as ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`,
+  ).get(tableName) as { ok: number } | undefined
+  if (!tableExists) return
+
+  const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  if (!columns.some((column) => column.name === columnName)) {
+    sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
+  }
+}
+
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS dramas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,6 +247,9 @@ sqlite.exec(`
     local_path TEXT,
     status TEXT DEFAULT 'pending',
     task_id TEXT,
+    app_project_id TEXT,
+    app_user_id TEXT,
+    studio_authorization_id TEXT,
     error_msg TEXT,
     width INTEGER,
     height INTEGER,
@@ -270,6 +285,9 @@ sqlite.exec(`
     local_path TEXT,
     status TEXT DEFAULT 'pending',
     task_id TEXT,
+    app_project_id TEXT,
+    app_user_id TEXT,
+    studio_authorization_id TEXT,
     error_msg TEXT,
     width INTEGER,
     height INTEGER,
@@ -291,6 +309,9 @@ sqlite.exec(`
     merged_url TEXT,
     duration INTEGER,
     task_id TEXT,
+    app_project_id TEXT,
+    app_user_id TEXT,
+    studio_authorization_id TEXT,
     error_msg TEXT,
     created_at TEXT NOT NULL,
     completed_at TEXT,
@@ -341,16 +362,15 @@ sqlite.exec(`
   );
 `)
 
-function ensureColumn(table: string, column: string, definition: string) {
-  const tableExists = sqlite.prepare(
-    `SELECT 1 as ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`,
-  ).get(table) as { ok: number } | undefined
-  if (!tableExists) return
-  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
-  if (!columns.some(col => col.name === column)) {
-    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
-  }
-}
+ensureColumn('image_generations', 'app_project_id', 'TEXT')
+ensureColumn('image_generations', 'app_user_id', 'TEXT')
+ensureColumn('image_generations', 'studio_authorization_id', 'TEXT')
+ensureColumn('video_generations', 'app_project_id', 'TEXT')
+ensureColumn('video_generations', 'app_user_id', 'TEXT')
+ensureColumn('video_generations', 'studio_authorization_id', 'TEXT')
+ensureColumn('video_merges', 'app_project_id', 'TEXT')
+ensureColumn('video_merges', 'app_user_id', 'TEXT')
+ensureColumn('video_merges', 'studio_authorization_id', 'TEXT')
 
 ensureColumn('episodes', 'image_config_id', 'INTEGER')
 ensureColumn('episodes', 'video_config_id', 'INTEGER')

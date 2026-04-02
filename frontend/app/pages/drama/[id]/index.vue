@@ -7,7 +7,7 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
           </svg>
-          返回
+          {{ locale === 'en' ? 'Back' : '返回' }}
         </button>
         <div class="head-info">
           <h1 class="page-title">{{ drama.title }}</h1>
@@ -16,12 +16,12 @@
             <span v-if="drama.style" class="meta-divider"></span>
             <span class="meta-item">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              {{ drama.characters?.length || 0 }} 角色
+              {{ locale === 'en' ? `${drama.characters?.length || 0} characters` : `${drama.characters?.length || 0} 角色` }}
             </span>
             <span class="meta-divider"></span>
             <span class="meta-item">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
-              {{ drama.scenes?.length || 0 }} 场景
+              {{ locale === 'en' ? `${drama.scenes?.length || 0} scenes` : `${drama.scenes?.length || 0} 场景` }}
             </span>
           </div>
         </div>
@@ -30,7 +30,7 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
           <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
         </svg>
-        添加集
+        {{ locale === 'en' ? 'Add Episode' : '添加集' }}
       </button>
     </div>
 
@@ -43,7 +43,7 @@
         <line x1="13" y1="8" x2="13" y2="16"/>
         <line x1="16" y1="8" x2="16" y2="16"/>
       </svg>
-      剧集列表
+      {{ locale === 'en' ? 'Episodes' : '剧集列表' }}
     </div>
 
     <div class="ep-grid">
@@ -59,7 +59,7 @@
           <span class="ep-title">{{ ep.title }}</span>
           <div class="ep-status">
             <span :class="['status-dot', hasScript(ep) ? 'dot-ready' : 'dot-pending']"></span>
-            <span class="status-text">{{ hasScript(ep) ? '已完成剧本' : '待编写' }}</span>
+            <span class="status-text">{{ hasScript(ep) ? (locale === 'en' ? 'Script ready' : '已完成剧本') : (locale === 'en' ? 'Needs script' : '待编写') }}</span>
             <span v-if="ep.duration" class="ep-duration">{{ ep.duration }}s</span>
           </div>
         </div>
@@ -79,7 +79,7 @@
             <line x1="8" y1="12" x2="16" y2="12"/>
           </svg>
         </div>
-        <p>点击上方「添加集」创建第一集</p>
+        <p>{{ locale === 'en' ? 'Click “Add Episode” above to create episode one.' : '点击上方「添加集」创建第一集' }}</p>
       </div>
     </div>
 
@@ -89,59 +89,59 @@
           <div class="dialog-head-copy">
             <div class="dialog-kicker">Episode Setup</div>
             <div class="dialog-title-row">
-              <div class="dialog-title">创建新集</div>
-              <span class="dialog-badge">配置将锁定</span>
+              <div class="dialog-title">{{ locale === 'en' ? 'Create Episode' : '创建新集' }}</div>
+              <span class="dialog-badge">{{ locale === 'en' ? 'Config will lock' : '配置将锁定' }}</span>
             </div>
-            <div class="dialog-sub">为这一集预先锁定图片、视频和音频生成服务。创建后，这些生成链路将始终跟随当前集配置。</div>
+            <div class="dialog-sub">{{ locale === 'en' ? 'Preselect the image, video, and audio services for this episode. Once created, the episode stays locked to this setup.' : '为这一集预先锁定图片、视频和音频生成服务。创建后，这些生成链路将始终跟随当前集配置。' }}</div>
           </div>
-          <button class="back-btn" @click="addDialog = false">取消</button>
+          <button class="back-btn" @click="addDialog = false">{{ locale === 'en' ? 'Cancel' : '取消' }}</button>
         </div>
         <div class="dialog-summary">
-          <div class="summary-chip">图片 · {{ imageConfigs.length }} 可选</div>
-          <div class="summary-chip">视频 · {{ videoConfigs.length }} 可选</div>
-          <div class="summary-chip">音频 · {{ audioConfigs.length }} 可选</div>
+          <div class="summary-chip">{{ locale === 'en' ? `Image · ${imageConfigs.length} available` : `图片 · ${imageConfigs.length} 可选` }}</div>
+          <div class="summary-chip">{{ locale === 'en' ? `Video · ${videoConfigs.length} available` : `视频 · ${videoConfigs.length} 可选` }}</div>
+          <div class="summary-chip">{{ locale === 'en' ? `Audio · ${audioConfigs.length} available` : `音频 · ${audioConfigs.length} 可选` }}</div>
         </div>
         <div class="dialog-body">
           <div class="dialog-section">
             <div class="dialog-section-head">
-              <span class="dialog-section-title">基础信息</span>
-              <span class="dialog-section-copy">这一项只影响显示名称，不影响生成配置</span>
+              <span class="dialog-section-title">{{ locale === 'en' ? 'Basics' : '基础信息' }}</span>
+              <span class="dialog-section-copy">{{ locale === 'en' ? 'This only changes the display title and does not affect generation settings.' : '这一项只影响显示名称，不影响生成配置' }}</span>
             </div>
             <label class="field">
-              <span class="field-label">标题</span>
-              <input v-model="newEpisodeTitle" class="input" placeholder="默认按集数自动命名" />
-              <span class="field-hint">留空时会自动按集数命名，例如“第 3 集”。</span>
+              <span class="field-label">{{ locale === 'en' ? 'Title' : '标题' }}</span>
+              <input v-model="newEpisodeTitle" class="input" :placeholder="locale === 'en' ? 'Auto-name from the episode number' : '默认按集数自动命名'" />
+              <span class="field-hint">{{ locale === 'en' ? 'Leave blank to auto-name by episode number, for example “Episode 3”.' : '留空时会自动按集数命名，例如“第 3 集”。' }}</span>
             </label>
           </div>
 
           <div class="dialog-section">
             <div class="dialog-section-head">
-              <span class="dialog-section-title">生成配置</span>
-              <span class="dialog-section-copy">创建后不可更改，建议在这里一次性选对</span>
+              <span class="dialog-section-title">{{ locale === 'en' ? 'Generation config' : '生成配置' }}</span>
+              <span class="dialog-section-copy">{{ locale === 'en' ? 'This cannot be changed after creation, so choose carefully here.' : '创建后不可更改，建议在这里一次性选对' }}</span>
             </div>
             <div class="config-grid">
               <label class="config-card">
                 <span class="config-card-kicker">IMAGE</span>
-                <span class="field-label">图片配置</span>
-                <BaseSelect v-model="newEpisodeImageConfigId" :options="imageConfigOptions" placeholder="选择图片服务" searchable />
+                <span class="field-label">{{ locale === 'en' ? 'Image config' : '图片配置' }}</span>
+                <BaseSelect v-model="newEpisodeImageConfigId" :options="imageConfigOptions" :placeholder="locale === 'en' ? 'Choose image service' : '选择图片服务'" searchable />
               </label>
               <label class="config-card">
                 <span class="config-card-kicker">VIDEO</span>
-                <span class="field-label">视频配置</span>
-                <BaseSelect v-model="newEpisodeVideoConfigId" :options="videoConfigOptions" placeholder="选择视频服务" searchable />
+                <span class="field-label">{{ locale === 'en' ? 'Video config' : '视频配置' }}</span>
+                <BaseSelect v-model="newEpisodeVideoConfigId" :options="videoConfigOptions" :placeholder="locale === 'en' ? 'Choose video service' : '选择视频服务'" searchable />
               </label>
               <label class="config-card">
                 <span class="config-card-kicker">AUDIO</span>
-                <span class="field-label">音频配置</span>
-                <BaseSelect v-model="newEpisodeAudioConfigId" :options="audioConfigOptions" placeholder="选择音频服务" searchable />
+                <span class="field-label">{{ locale === 'en' ? 'Audio config' : '音频配置' }}</span>
+                <BaseSelect v-model="newEpisodeAudioConfigId" :options="audioConfigOptions" :placeholder="locale === 'en' ? 'Choose audio service' : '选择音频服务'" searchable />
               </label>
             </div>
           </div>
         </div>
         <div class="dialog-foot">
-          <div class="dialog-foot-copy">创建后，工作台中的图片、视频、音频生成入口都会锁定到当前集。</div>
+          <div class="dialog-foot-copy">{{ locale === 'en' ? 'After creation, all image, video, and audio generation in the workspace will stay locked to this episode.' : '创建后，工作台中的图片、视频、音频生成入口都会锁定到当前集。' }}</div>
           <button class="btn btn-primary" :disabled="creatingEpisode || !canCreateEpisode" @click="addEpisode">
-            {{ creatingEpisode ? '创建中...' : '创建并锁定配置' }}
+            {{ creatingEpisode ? (locale === 'en' ? 'Creating...' : '创建中...') : (locale === 'en' ? 'Create and lock config' : '创建并锁定配置') }}
           </button>
         </div>
       </div>
@@ -152,6 +152,7 @@
 <script setup>
 import { toast } from 'vue-sonner'
 import { aiConfigAPI, dramaAPI, episodeAPI } from '~/composables/useApi'
+import { useStudioLocale } from '~/composables/useStudioLocale'
 
 const route = useRoute()
 const drama = ref(null)
@@ -165,6 +166,7 @@ const audioConfigs = ref([])
 const newEpisodeImageConfigId = ref(null)
 const newEpisodeVideoConfigId = ref(null)
 const newEpisodeAudioConfigId = ref(null)
+const { locale, tr } = useStudioLocale()
 
 function hasScript(ep) { return !!(ep.script_content || ep.scriptContent) }
 
@@ -221,7 +223,7 @@ async function addEpisode() {
       video_config_id: newEpisodeVideoConfigId.value,
       audio_config_id: newEpisodeAudioConfigId.value,
     })
-    toast.success('已添加新集')
+    toast.success(tr('已添加新集'))
     addDialog.value = false
     load()
   } catch (e) {

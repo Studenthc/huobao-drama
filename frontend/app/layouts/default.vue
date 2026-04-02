@@ -1,16 +1,15 @@
 <template>
   <div class="shell">
-    <!-- Header -->
     <header class="header">
       <div class="header-left">
         <button class="brand" @click="navigateTo('/')">
           <div class="brand-mark">
-            <img v-if="showBrandImage" :src="brandLogo" alt="火宝短剧" class="brand-logo" @error="showBrandImage = false" />
-            <span v-else class="brand-fallback">火</span>
+            <img v-if="showBrandImage" :src="brandLogo" alt="TrendShort Studio" class="brand-logo" @error="showBrandImage = false" />
+            <span v-else class="brand-fallback">TS</span>
           </div>
           <div class="brand-text">
-            <span class="brand-name">火宝短剧</span>
-            <span class="brand-sub">Huobao Shorts</span>
+            <span class="brand-name">{{ branding.brandName }}</span>
+            <span class="brand-sub">{{ branding.brandSub }}</span>
           </div>
         </button>
       </div>
@@ -21,18 +20,26 @@
             <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
             <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
           </svg>
-          <span>项目</span>
+          <span>{{ t.projects }}</span>
         </NuxtLink>
         <NuxtLink to="/settings" class="nav-link" :class="{ active: route.path === '/settings' }">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
-          <span>设置</span>
+          <span>{{ t.settings }}</span>
         </NuxtLink>
       </nav>
 
       <div class="header-right">
+        <StudioLanguageSwitcher compact />
+        <a
+          v-if="returnUrl"
+          :href="returnUrl"
+          class="return-link"
+        >
+          {{ t.backToTrendShort }}
+        </a>
         <div class="film-strip">
           <span class="film-frame"></span>
           <span class="film-frame"></span>
@@ -47,11 +54,28 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import brandLogo from '~/assets/huobao-logo.png'
+import { useStudioLocale } from '~/composables/useStudioLocale'
+import StudioLanguageSwitcher from '~/components/StudioLanguageSwitcher.vue'
+import { useTrendShortBranding } from '~/integrations/trendshort/branding'
+import { fetchTrendShortStudioSession } from '~/integrations/trendshort/session'
 
 const route = useRoute()
 const showBrandImage = ref(true)
+const returnUrl = ref('')
+const { locale, t, syncLocale } = useStudioLocale()
+const branding = useTrendShortBranding(locale)
+
+onMounted(async () => {
+  try {
+    const session = await fetchTrendShortStudioSession()
+    returnUrl.value = session?.return_url || ''
+    syncLocale(returnUrl.value)
+  } catch {
+    returnUrl.value = ''
+  }
+})
 </script>
 
 <style scoped>
@@ -135,6 +159,25 @@ const showBrandImage = ref(true)
 }
 
 .header-right { display: flex; align-items: center; margin-left: auto; }
+.return-link {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 12px;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.18s var(--ease-out);
+}
+.return-link:hover {
+  color: var(--text-0);
+  border-color: rgba(76,125,255,0.28);
+  background: var(--bg-hover);
+}
 
 /* Film strip decoration */
 .film-strip {

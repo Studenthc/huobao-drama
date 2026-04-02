@@ -4,6 +4,7 @@ import { db, schema } from '../db/index.js'
 import { success, created, now, badRequest } from '../utils/response.js'
 import { generateImage } from '../services/image-generation.js'
 import { logTaskError, logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import { authorizeStudioAction, getStudioContext } from '../integrations/trendshort/index.js'
 
 const app = new Hono()
 
@@ -13,6 +14,7 @@ app.post('/', async (c) => {
   if (!body.prompt) return badRequest(c, 'prompt is required')
 
   try {
+    const studioContext = getStudioContext(c)
     let configId: number | undefined = body.config_id
     if (body.storyboard_id) {
       const [sb] = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, Number(body.storyboard_id))).all()
@@ -30,6 +32,12 @@ app.post('/', async (c) => {
       frameType: body.frame_type,
     })
     logTaskPayload('ImageAPI', 'request body', body)
+    const authorization = await authorizeStudioAction(studioContext, 'image_generation', {
+      drama_id: body.drama_id,
+      storyboard_id: body.storyboard_id,
+      scene_id: body.scene_id,
+      character_id: body.character_id,
+    })
     const id = await generateImage({
       storyboardId: body.storyboard_id,
       dramaId: body.drama_id,
@@ -41,6 +49,9 @@ app.post('/', async (c) => {
       referenceImages: body.reference_images,
       frameType: body.frame_type,
       configId,
+      appProjectId: studioContext.session.project_id,
+      appUserId: studioContext.session.sub,
+      studioAuthorizationId: authorization?.authorizationId,
     })
 
     const [record] = db.select().from(schema.imageGenerations)

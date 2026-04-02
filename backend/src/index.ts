@@ -1,7 +1,9 @@
+import 'dotenv/config'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import fs from 'node:fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -22,6 +24,9 @@ import grid from './routes/grid.js'
 import skills from './routes/skills.js'
 import webhooks from './routes/webhooks.js'
 import aiVoices from './routes/aiVoices.js'
+import assets from './routes/assets.js'
+import tasks from './routes/tasks.js'
+import { trendshortRouter, requireStudioAuth } from './integrations/trendshort/index.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -31,7 +36,7 @@ const app = new Hono()
 
 // Middleware
 app.use('*', cors({
-  origin: ['http://localhost:3013', 'http://localhost:5679'],
+  origin: ['http://localhost:3013', 'http://127.0.0.1:3013', 'http://localhost:3023', 'http://127.0.0.1:3023', 'http://localhost:5679'],
   credentials: true,
 }))
 app.use('*', requestLogger)
@@ -39,9 +44,11 @@ app.use('*', errorHandler)
 
 // Health check
 app.get('/api/v1/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
+app.route('/api/studio', trendshortRouter)
 
 // API routes
 const api = new Hono()
+api.use('*', requireStudioAuth)
 api.route('/dramas', dramas)
 api.route('/episodes', episodes)
 api.route('/storyboards', storyboards)
@@ -59,6 +66,8 @@ api.route('/merge', merge)
 api.route('/grid', grid)
 api.route('/skills', skills)
 api.route('/ai-voices', aiVoices)
+api.route('/assets', assets)
+api.route('/tasks', tasks)
 
 app.route('/api/v1', api)
 
@@ -69,10 +78,12 @@ app.route('/webhooks', webhooks)
 app.use('/static/*', serveStatic({ root: path.join(projectRoot, 'data') }))
 
 // Serve frontend (production build)
-const distPath = path.join(projectRoot, 'frontend', 'dist')
+const distPath = fs.existsSync(path.join(projectRoot, 'frontend', '.output', 'public'))
+  ? path.join(projectRoot, 'frontend', '.output', 'public')
+  : path.join(projectRoot, 'frontend', 'dist')
 app.use('*', serveStatic({ root: distPath }))
 app.get('*', serveStatic({ root: distPath, path: 'index.html' }))
 
 const port = Number(process.env.PORT || 5679)
-console.log(`🚀 Huobao Drama TS server on http://localhost:${port}`)
+console.log(`🚀 TrendShort Studio server on http://localhost:${port}`)
 serve({ fetch: app.fetch, port })

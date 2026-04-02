@@ -6,6 +6,8 @@ import { downloadFile, readImageAsCompressedDataUrl } from '../utils/storage.js'
 import { getVideoAdapter } from './adapters/registry'
 import type { AIConfig } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
+import type { StudioRequestContext } from '../integrations/trendshort/index.js'
+import { finalizeStudioAction, refundStudioAction } from '../integrations/trendshort/index.js'
 
 interface GenerateVideoParams {
   storyboardId?: number
@@ -20,6 +22,9 @@ interface GenerateVideoParams {
   duration?: number
   aspectRatio?: string
   configId?: number
+  appProjectId?: string
+  appUserId?: string
+  studioAuthorizationId?: string | null
 }
 
 export async function generateVideo(params: GenerateVideoParams): Promise<number> {
@@ -42,6 +47,9 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
     referenceImageUrls: params.referenceImageUrls ? JSON.stringify(params.referenceImageUrls) : null,
     duration: params.duration || 5,
     aspectRatio: params.aspectRatio || '16:9',
+    appProjectId: params.appProjectId,
+    appUserId: params.appUserId,
+    studioAuthorizationId: params.studioAuthorizationId,
     status: 'processing',
     createdAt: ts,
     updatedAt: ts,
@@ -154,10 +162,7 @@ async function processVideoGeneration(id: number, config: AIConfig) {
     pollVideoTask(id, config, taskId!, record.storyboardId)
   } catch (err: any) {
     logTaskError('VideoTask', 'process', { id, provider: config.provider, error: err.message })
-    db.update(schema.videoGenerations)
-      .set({ status: 'failed', errorMsg: err.message, updatedAt: now() })
-      .where(eq(schema.videoGenerations.id, id))
-      .run()
+    await markVideoFailed(id, err.message)
   }
 }
 
@@ -228,10 +233,7 @@ async function pollVideoTask(id: number, config: AIConfig, taskId: string, story
     } catch (err: any) {
       if (i === 299) {
         logTaskError('VideoTask', 'poll-timeout', { id, taskId, error: err.message })
-        db.update(schema.videoGenerations)
-          .set({ status: 'failed', errorMsg: `Timeout: ${err.message}`, updatedAt: now() })
-          .where(eq(schema.videoGenerations.id, id))
-          .run()
+        await markVideoFailed(id, `Timeout: ${err.message}`)
         return
       }
       logTaskWarn('VideoTask', 'poll-retry', { id, taskId, attempt: i + 1, error: err.message })
@@ -240,6 +242,9 @@ async function pollVideoTask(id: number, config: AIConfig, taskId: string, story
 }
 
 async function handleVideoComplete(id: number, videoUrl: string, duration: number | null | undefined, storyboardId?: number | null) {
+  const [record] = db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.id, id)).all()
+  if (!record) return
+
   const localPath = await downloadFile(videoUrl, 'videos')
   db.update(schema.videoGenerations)
     .set({ videoUrl, localPath, status: 'completed', completedAt: now(), updatedAt: now() })
@@ -252,5 +257,57 @@ async function handleVideoComplete(id: number, videoUrl: string, duration: numbe
       .set({ videoUrl: localPath, duration: duration || undefined, updatedAt: now() })
       .where(eq(schema.storyboards.id, storyboardId))
       .run()
+  }
+
+  if (record.appProjectId && record.appUserId && record.studioAuthorizationId) {
+    const studioContext: StudioRequestContext = {
+      authType: 'service',
+      session: {
+        sub: record.appUserId,
+        workspace_id: record.appUserId,
+        project_id: record.appProjectId,
+        drama_id: record.dramaId || 0,
+        plan_id: null,
+        iss: 'app',
+        aud: 'studio',
+        exp: Math.floor(Date.now() / 1000) + 60,
+      },
+    }
+    await finalizeStudioAction(studioContext, record.studioAuthorizationId, {
+      generation_id: id,
+      drama_id: record.dramaId,
+      storyboard_id: record.storyboardId,
+      video_url: localPath,
+    })
+  }
+}
+
+async function markVideoFailed(id: number, message: string) {
+  const [record] = db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.id, id)).all()
+  db.update(schema.videoGenerations)
+    .set({ status: 'failed', errorMsg: message, updatedAt: now() })
+    .where(eq(schema.videoGenerations.id, id))
+    .run()
+
+  if (record?.appProjectId && record.appUserId && record.studioAuthorizationId) {
+    const studioContext: StudioRequestContext = {
+      authType: 'service',
+      session: {
+        sub: record.appUserId,
+        workspace_id: record.appUserId,
+        project_id: record.appProjectId,
+        drama_id: record.dramaId || 0,
+        plan_id: null,
+        iss: 'app',
+        aud: 'studio',
+        exp: Math.floor(Date.now() / 1000) + 60,
+      },
+    }
+    await refundStudioAction(studioContext, record.studioAuthorizationId, 'video_generation_failed', {
+      generation_id: id,
+      drama_id: record.dramaId,
+      storyboard_id: record.storyboardId,
+      error: message,
+    })
   }
 }

@@ -2,7 +2,7 @@
   <div class="base-select" ref="rootEl">
     <!-- Trigger -->
     <button type="button" class="base-select-trigger" :class="{ open: isOpen }" @click="toggle">
-      <span :class="selectedLabel ? '' : 'placeholder'" class="base-select-label">{{ selectedLabel || placeholder }}</span>
+      <span :class="selectedLabel ? '' : 'placeholder'" class="base-select-label">{{ selectedLabel || localizedPlaceholder }}</span>
       <ChevronDown :size="13" class="base-select-arrow" />
     </button>
 
@@ -16,7 +16,7 @@
             ref="searchInputEl"
             v-model="searchQuery"
             class="base-select-search-input"
-            placeholder="搜索..."
+            :placeholder="localizedSearchPlaceholder"
             @keydown="onSearchKeydown"
           />
         </div>
@@ -36,7 +36,7 @@
               >{{ opt.label }}</button>
             </template>
           </template>
-          <div v-else class="base-select-empty">无匹配结果</div>
+          <div v-else class="base-select-empty">{{ localizedEmpty }}</div>
         </div>
       </div>
     </Teleport>
@@ -51,6 +51,8 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ChevronDown, Search } from 'lucide-vue-next'
+import { useStudioLocale } from '~/composables/useStudioLocale'
+import { translateUiText } from '~/i18n/ui-copy'
 
 const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
@@ -59,6 +61,7 @@ const props = defineProps({
   searchable: { type: Boolean, default: true },
 })
 const emit = defineEmits(['update:modelValue'])
+const { locale } = useStudioLocale()
 
 const isOpen = ref(false)
 const searchQuery = ref('')
@@ -126,6 +129,13 @@ const selectedLabel = computed(() => {
   }
   return ''
 })
+
+const localizedPlaceholder = computed(() => {
+  if (props.placeholder === '请选择...') return locale.value === 'en' ? 'Please select...' : '请选择...'
+  return translateUiText(props.placeholder, locale.value)
+})
+const localizedSearchPlaceholder = computed(() => translateUiText('搜索...', locale.value))
+const localizedEmpty = computed(() => translateUiText('无匹配结果', locale.value))
 
 function toggle() {
   isOpen.value ? close() : open()

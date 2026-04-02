@@ -6,6 +6,8 @@ import { downloadFile, readImageAsCompressedDataUrl, saveBase64Image } from '../
 import { getImageAdapter } from './adapters/registry'
 import type { AIConfig } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
+import type { StudioRequestContext } from '../integrations/trendshort/index.js'
+import { finalizeStudioAction, refundStudioAction } from '../integrations/trendshort/index.js'
 
 interface GenerateImageParams {
   storyboardId?: number
@@ -18,6 +20,9 @@ interface GenerateImageParams {
   referenceImages?: string[]
   frameType?: string
   configId?: number
+  appProjectId?: string
+  appUserId?: string
+  studioAuthorizationId?: string | null
 }
 
 export async function generateImage(params: GenerateImageParams): Promise<number> {
@@ -38,6 +43,9 @@ export async function generateImage(params: GenerateImageParams): Promise<number
     size: params.size || '1920x1080',
     frameType: params.frameType,
     referenceImages: params.referenceImages ? JSON.stringify(params.referenceImages) : null,
+    appProjectId: params.appProjectId,
+    appUserId: params.appUserId,
+    studioAuthorizationId: params.studioAuthorizationId,
     status: 'processing',
     createdAt: ts,
     updatedAt: ts,
@@ -154,10 +162,7 @@ async function processImageGeneration(id: number, config: AIConfig) {
     pollImageTask(id, config, taskId!)
   } catch (err: any) {
     logTaskError('ImageTask', 'process', { id, provider: config.provider, error: err.message })
-    db.update(schema.imageGenerations)
-      .set({ status: 'failed', errorMsg: err.message, updatedAt: now() })
-      .where(eq(schema.imageGenerations.id, id))
-      .run()
+    await markImageFailed(id, err.message)
   }
 }
 
@@ -207,19 +212,13 @@ async function pollImageTask(id: number, config: AIConfig, taskId: string) {
   for (let i = 0; i < 120; i++) {
     if (Date.now() - startedAt >= maxDurationMs) {
       logTaskError('ImageTask', 'poll-timeout', { id, taskId, error: 'Polling exceeded 10 minutes' })
-      db.update(schema.imageGenerations)
-        .set({ status: 'failed', errorMsg: 'Timeout: Polling exceeded 10 minutes', updatedAt: now() })
-        .where(eq(schema.imageGenerations.id, id))
-        .run()
+      await markImageFailed(id, 'Timeout: Polling exceeded 10 minutes')
       return
     }
     await new Promise(r => setTimeout(r, 5000))
     if (Date.now() - startedAt >= maxDurationMs) {
       logTaskError('ImageTask', 'poll-timeout', { id, taskId, error: 'Polling exceeded 10 minutes' })
-      db.update(schema.imageGenerations)
-        .set({ status: 'failed', errorMsg: 'Timeout: Polling exceeded 10 minutes', updatedAt: now() })
-        .where(eq(schema.imageGenerations.id, id))
-        .run()
+      await markImageFailed(id, 'Timeout: Polling exceeded 10 minutes')
       return
     }
     try {
@@ -264,10 +263,7 @@ async function pollImageTask(id: number, config: AIConfig, taskId: string) {
     } catch (err: any) {
       if (i === 119 || Date.now() - startedAt >= maxDurationMs) {
         logTaskError('ImageTask', 'poll-timeout', { id, taskId, error: err.message })
-        db.update(schema.imageGenerations)
-          .set({ status: 'failed', errorMsg: `Timeout: ${err.message}`, updatedAt: now() })
-          .where(eq(schema.imageGenerations.id, id))
-          .run()
+        await markImageFailed(id, `Timeout: ${err.message}`)
         return
       }
       logTaskWarn('ImageTask', 'poll-retry', { id, taskId, attempt: i + 1, error: err.message })
@@ -279,6 +275,7 @@ async function handleImageComplete(id: number, provider: string, imageUrl: strin
   const localPath = await downloadFile(imageUrl, 'images')
   const rows = db.select().from(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).all()
   const record = rows[0]
+  if (!record) return
 
   db.update(schema.imageGenerations)
     .set({ imageUrl, localPath, status: 'completed', updatedAt: now() })
@@ -300,12 +297,36 @@ async function handleImageComplete(id: number, provider: string, imageUrl: strin
   if (record?.sceneId) {
     db.update(schema.scenes).set({ imageUrl: localPath, status: 'completed', updatedAt: now() }).where(eq(schema.scenes.id, record.sceneId)).run()
   }
+
+  if (record.appProjectId && record.appUserId && record.studioAuthorizationId) {
+    const studioContext: StudioRequestContext = {
+      authType: 'service',
+      session: {
+        sub: record.appUserId,
+        workspace_id: record.appUserId,
+        project_id: record.appProjectId,
+        drama_id: record.dramaId || 0,
+        plan_id: null,
+        iss: 'app',
+        aud: 'studio',
+        exp: Math.floor(Date.now() / 1000) + 60,
+      },
+    }
+    await finalizeStudioAction(studioContext, record.studioAuthorizationId, {
+      generation_id: id,
+      drama_id: record.dramaId,
+      storyboard_id: record.storyboardId,
+      image_url: localPath,
+      provider,
+    })
+  }
 }
 
 async function handleImageCompleteBase64(id: number, provider: string, base64Data: string, mimeType: string) {
   const localPath = await saveBase64Image(base64Data, mimeType, 'images')
   const rows = db.select().from(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).all()
   const record = rows[0]
+  if (!record) return
 
   db.update(schema.imageGenerations)
     .set({ localPath, status: 'completed', updatedAt: now() })
@@ -326,5 +347,60 @@ async function handleImageCompleteBase64(id: number, provider: string, base64Dat
   }
   if (record?.sceneId) {
     db.update(schema.scenes).set({ imageUrl: localPath, status: 'completed', updatedAt: now() }).where(eq(schema.scenes.id, record.sceneId)).run()
+  }
+
+  if (record.appProjectId && record.appUserId && record.studioAuthorizationId) {
+    const studioContext: StudioRequestContext = {
+      authType: 'service',
+      session: {
+        sub: record.appUserId,
+        workspace_id: record.appUserId,
+        project_id: record.appProjectId,
+        drama_id: record.dramaId || 0,
+        plan_id: null,
+        iss: 'app',
+        aud: 'studio',
+        exp: Math.floor(Date.now() / 1000) + 60,
+      },
+    }
+    await finalizeStudioAction(studioContext, record.studioAuthorizationId, {
+      generation_id: id,
+      drama_id: record.dramaId,
+      storyboard_id: record.storyboardId,
+      image_url: localPath,
+      provider,
+    })
+  }
+}
+
+async function markImageFailed(id: number, message: string) {
+  const rows = db.select().from(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).all()
+  const record = rows[0]
+
+  db.update(schema.imageGenerations)
+    .set({ status: 'failed', errorMsg: message, updatedAt: now() })
+    .where(eq(schema.imageGenerations.id, id))
+    .run()
+
+  if (record?.appProjectId && record.appUserId && record.studioAuthorizationId) {
+    const studioContext: StudioRequestContext = {
+      authType: 'service',
+      session: {
+        sub: record.appUserId,
+        workspace_id: record.appUserId,
+        project_id: record.appProjectId,
+        drama_id: record.dramaId || 0,
+        plan_id: null,
+        iss: 'app',
+        aud: 'studio',
+        exp: Math.floor(Date.now() / 1000) + 60,
+      },
+    }
+    await refundStudioAction(studioContext, record.studioAuthorizationId, 'image_generation_failed', {
+      generation_id: id,
+      drama_id: record.dramaId,
+      storyboard_id: record.storyboardId,
+      error: message,
+    })
   }
 }

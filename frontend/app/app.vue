@@ -7,6 +7,19 @@
 
 <script setup>
 import { Toaster } from 'vue-sonner'
+import { useStudioLocale } from '~/composables/useStudioLocale'
+
+const { locale } = useStudioLocale()
+
+useHead(() => ({
+  htmlAttrs: {
+    lang: locale.value,
+  },
+  meta: [
+    { name: 'robots', content: 'noindex, nofollow' },
+    { name: 'googlebot', content: 'noindex, nofollow' },
+  ],
+}))
 </script>
 
 <style>

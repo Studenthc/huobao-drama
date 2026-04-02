@@ -10,9 +10,9 @@ const app = new Hono()
 app.post('/', async (c) => {
   const body = await c.req.json()
   if (!body.drama_id) return badRequest(c, 'drama_id required')
-  if (!body.image_config_id || !body.video_config_id || !body.audio_config_id) {
-    return badRequest(c, 'image_config_id, video_config_id and audio_config_id are required')
-  }
+  const imageConfigId = body.image_config_id ?? null
+  const videoConfigId = body.video_config_id ?? null
+  const audioConfigId = body.audio_config_id ?? null
   const ts = now()
 
   // Get next episode number
@@ -25,9 +25,9 @@ app.post('/', async (c) => {
     dramaId: body.drama_id,
     episodeNumber: nextNum,
     title: body.title || `第${nextNum}集`,
-    imageConfigId: body.image_config_id,
-    videoConfigId: body.video_config_id,
-    audioConfigId: body.audio_config_id,
+    imageConfigId,
+    videoConfigId,
+    audioConfigId,
     createdAt: ts,
     updatedAt: ts,
   }).run()
