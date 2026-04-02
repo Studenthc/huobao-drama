@@ -28,6 +28,7 @@ import assets from './routes/assets.js'
 import tasks from './routes/tasks.js'
 import { trendshortRouter, requireStudioAuth } from './integrations/trendshort/index.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
+import { hasNeonDatabaseUrl } from './db/neon-client.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '../..')
@@ -43,7 +44,13 @@ app.use('*', requestLogger)
 app.use('*', errorHandler)
 
 // Health check
-app.get('/api/v1/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
+app.get('/api/v1/health', (c) =>
+  c.json({
+    status: 'ok',
+    db_mode: hasNeonDatabaseUrl() ? 'postgres' : 'sqlite',
+    timestamp: new Date().toISOString(),
+  }),
+)
 app.route('/api/studio', trendshortRouter)
 
 // API routes
@@ -85,5 +92,5 @@ app.use('*', serveStatic({ root: distPath }))
 app.get('*', serveStatic({ root: distPath, path: 'index.html' }))
 
 const port = Number(process.env.PORT || 5679)
-console.log(`🚀 TrendShort Studio server on http://localhost:${port}`)
+console.log(`🚀 TrendShort Studio server on http://localhost:${port} (${hasNeonDatabaseUrl() ? 'postgres' : 'sqlite'})`)
 serve({ fetch: app.fetch, port })
