@@ -1,8 +1,15 @@
 import { Hono } from 'hono'
-import { eq, isNull, like, desc } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, badRequest, notFound, created, now } from '../utils/response.js'
 import { toSnakeCase, toSnakeCaseArray } from '../utils/transform.js'
+import {
+  claimLegacyDramaOwnershipByIds,
+  getScopedDrama,
+  getTrendShortOwnership,
+  listScopedDramaIds,
+} from '../integrations/trendshort/scope.js'
+import { getStudioContext } from '../integrations/trendshort/auth.js'
 
 const app = new Hono()
 
@@ -12,11 +19,40 @@ app.get('/', async (c) => {
   const pageSize = Number(c.req.query('page_size') || 20)
   const status = c.req.query('status')
   const keyword = c.req.query('keyword')
+  const studioContext = getStudioContext(c)
 
-  let query = db.select().from(schema.dramas).where(isNull(schema.dramas.deletedAt))
+  const allRows = await db.select()
+    .from(schema.dramas)
+    .where(
+      and(
+        isNull(schema.dramas.deletedAt),
+        eq(schema.dramas.appWorkspaceId, studioContext.session.workspace_id),
+      ),
+    )
+    .orderBy(desc(schema.dramas.updatedAt))
+    .all()
 
-  const allRows = await query.orderBy(desc(schema.dramas.updatedAt))
-  let filtered = allRows
+  const legacyRows = await db.select()
+    .from(schema.dramas)
+    .where(
+      and(
+        isNull(schema.dramas.deletedAt),
+        isNull(schema.dramas.appWorkspaceId),
+        isNull(schema.dramas.appUserId),
+      ),
+    )
+    .orderBy(desc(schema.dramas.updatedAt))
+    .all()
+
+  await claimLegacyDramaOwnershipByIds(studioContext, legacyRows.map((drama) => drama.id))
+
+  const combinedRows = [...allRows, ...legacyRows].reduce<typeof allRows>((acc, drama) => {
+    if (!acc.some((item) => item.id === drama.id)) {
+      acc.push(drama)
+    }
+    return acc
+  }, [])
+  let filtered = combinedRows
 
   if (status) filtered = filtered.filter(d => d.status === status)
   if (keyword) filtered = filtered.filter(d => d.title.includes(keyword))
@@ -52,8 +88,10 @@ app.get('/', async (c) => {
 app.post('/', async (c) => {
   const body = await c.req.json()
   const ts = now()
+  const studioContext = getStudioContext(c)
   const res = db.insert(schema.dramas).values({
     title: body.title,
+    ...getTrendShortOwnership(studioContext),
     description: body.description,
     genre: body.genre,
     style: body.style,
@@ -86,7 +124,10 @@ app.post('/', async (c) => {
 
 // GET /dramas/stats — must be before /:id
 app.get('/stats', async (c) => {
-  const all = db.select().from(schema.dramas).where(isNull(schema.dramas.deletedAt)).all()
+  const dramaIds = await listScopedDramaIds(c)
+  const all = dramaIds.length
+    ? db.select().from(schema.dramas).where(and(isNull(schema.dramas.deletedAt), eq(schema.dramas.appWorkspaceId, getStudioContext(c).session.workspace_id))).all()
+    : []
   const byStatus = Object.entries(
     all.reduce((acc, d) => {
       acc[d.status || 'draft'] = (acc[d.status || 'draft'] || 0) + 1
@@ -98,7 +139,7 @@ app.get('/stats', async (c) => {
 
 app.get('/:id/stats', async (c) => {
   const id = Number(c.req.param('id'))
-  const [drama] = await db.select().from(schema.dramas).where(eq(schema.dramas.id, id))
+  const drama = await getScopedDrama(c, id)
   if (!drama) return notFound(c, '剧本不存在')
 
   const episodes = await db.select().from(schema.episodes).where(eq(schema.episodes.dramaId, id))
@@ -114,7 +155,7 @@ app.get('/:id/stats', async (c) => {
 // GET /dramas/:id - Get drama detail
 app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  const [drama] = await db.select().from(schema.dramas).where(eq(schema.dramas.id, id))
+  const drama = await getScopedDrama(c, id)
   if (!drama) return notFound(c, '剧本不存在')
 
   const eps = await db.select().from(schema.episodes)
@@ -139,6 +180,8 @@ app.get('/:id', async (c) => {
 // PUT /dramas/:id - Update drama
 app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
+  const drama = await getScopedDrama(c, id)
+  if (!drama) return notFound(c, '剧本不存在')
   const body = await c.req.json()
   const updates: Record<string, any> = { updatedAt: now() }
   if (body.title !== undefined) updates.title = body.title
@@ -155,6 +198,8 @@ app.put('/:id', async (c) => {
 // DELETE /dramas/:id - Soft delete
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
+  const drama = await getScopedDrama(c, id)
+  if (!drama) return notFound(c, '剧本不存在')
   await db.update(schema.dramas).set({ deletedAt: now() }).where(eq(schema.dramas.id, id))
   return success(c)
 })
@@ -162,6 +207,8 @@ app.delete('/:id', async (c) => {
 // PUT /dramas/:id/characters - Save characters
 app.put('/:id/characters', async (c) => {
   const dramaId = Number(c.req.param('id'))
+  const drama = await getScopedDrama(c, dramaId)
+  if (!drama) return notFound(c, '剧本不存在')
   const body = await c.req.json()
   const chars = body.characters || []
   const ts = now()
@@ -179,6 +226,8 @@ app.put('/:id/characters', async (c) => {
 // PUT /dramas/:id/episodes - Save episodes
 app.put('/:id/episodes', async (c) => {
   const dramaId = Number(c.req.param('id'))
+  const drama = await getScopedDrama(c, dramaId)
+  if (!drama) return notFound(c, '剧本不存在')
   const body = await c.req.json()
   const episodes = body.episodes || []
   const ts = now()

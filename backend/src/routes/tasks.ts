@@ -3,6 +3,7 @@ import { eq, inArray } from 'drizzle-orm'
 
 import { db, schema } from '../db/index.js'
 import { success } from '../utils/response.js'
+import { getScopedDrama, getScopedEpisode } from '../integrations/trendshort/scope.js'
 
 const app = new Hono()
 
@@ -18,8 +19,8 @@ app.get('/', async (c) => {
     return success(c, [])
   }
 
-  const [drama] = db.select().from(schema.dramas).where(eq(schema.dramas.id, resourceId)).all()
-  const [episode] = db.select().from(schema.episodes).where(eq(schema.episodes.id, resourceId)).all()
+  const drama = await getScopedDrama(c, resourceId)
+  const episode = drama ? null : await getScopedEpisode(c, resourceId)
 
   const tasks: Array<{
     id: string

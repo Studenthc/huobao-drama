@@ -7,6 +7,8 @@ import { sqliteTable, text, integer, real, primaryKey } from 'drizzle-orm/sqlite
 export const dramas = sqliteTable('dramas', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   title: text('title').notNull(),
+  appWorkspaceId: text('app_workspace_id'),
+  appUserId: text('app_user_id'),
   description: text('description'),
   genre: text('genre'),
   style: text('style').default('realistic'),

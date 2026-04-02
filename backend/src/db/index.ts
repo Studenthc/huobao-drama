@@ -27,6 +27,8 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS dramas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
+    app_workspace_id TEXT,
+    app_user_id TEXT,
     description TEXT,
     genre TEXT,
     style TEXT DEFAULT 'realistic',
@@ -362,6 +364,8 @@ sqlite.exec(`
   );
 `)
 
+ensureColumn('dramas', 'app_workspace_id', 'TEXT')
+ensureColumn('dramas', 'app_user_id', 'TEXT')
 ensureColumn('image_generations', 'app_project_id', 'TEXT')
 ensureColumn('image_generations', 'app_user_id', 'TEXT')
 ensureColumn('image_generations', 'studio_authorization_id', 'TEXT')

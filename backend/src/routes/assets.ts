@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import { db, schema } from '../db/index.js'
 import { success } from '../utils/response.js'
+import { getScopedDrama, listScopedDramaIds } from '../integrations/trendshort/scope.js'
 
 const app = new Hono()
 
@@ -14,7 +15,33 @@ app.get('/', async (c) => {
 
   const filters = [isNull(schema.assets.deletedAt)]
   if (dramaId) {
+    const drama = await getScopedDrama(c, dramaId)
+    if (!drama) {
+      return success(c, {
+        items: [],
+        pagination: {
+          page,
+          page_size: pageSize,
+          total: 0,
+          total_pages: 0,
+        },
+      })
+    }
     filters.push(eq(schema.assets.dramaId, dramaId))
+  } else {
+    const dramaIds = await listScopedDramaIds(c)
+    if (!dramaIds.length) {
+      return success(c, {
+        items: [],
+        pagination: {
+          page,
+          page_size: pageSize,
+          total: 0,
+          total_pages: 0,
+        },
+      })
+    }
+    filters.push(inArray(schema.assets.dramaId, dramaIds))
   }
   if (type) {
     filters.push(eq(schema.assets.type, type))
