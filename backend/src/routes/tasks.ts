@@ -1,8 +1,16 @@
 import { Hono } from 'hono'
-import { eq, inArray } from 'drizzle-orm'
 
-import { db, schema } from '../db/index.js'
 import { success } from '../utils/response.js'
+import {
+  listEpisodesByDramaId,
+  listImageGenerationsByDramaId,
+  listImageGenerationsByStoryboardIds,
+  listStoryboardsByEpisodeIdOrdered,
+  listVideoGenerationsByDramaId,
+  listVideoGenerationsByStoryboardIds,
+  listVideoMergesByDramaId,
+  listVideoMergesByEpisodeId,
+} from '../db/repos/studio-content.js'
 import { getScopedDrama, getScopedEpisode } from '../integrations/trendshort/scope.js'
 
 const app = new Hono()
@@ -32,9 +40,11 @@ app.get('/', async (c) => {
   }> = []
 
   if (drama) {
-    const images = db.select().from(schema.imageGenerations).where(eq(schema.imageGenerations.dramaId, drama.id)).all()
-    const videos = db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.dramaId, drama.id)).all()
-    const merges = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.dramaId, drama.id)).all()
+    const [images, videos, merges] = await Promise.all([
+      listImageGenerationsByDramaId(drama.id),
+      listVideoGenerationsByDramaId(drama.id),
+      listVideoMergesByDramaId(drama.id),
+    ])
 
     tasks.push(
       ...images.map((item) => ({
@@ -65,15 +75,13 @@ app.get('/', async (c) => {
   }
 
   if (episode) {
-    const storyboards = db.select().from(schema.storyboards).where(eq(schema.storyboards.episodeId, episode.id)).all()
+    const storyboards = await listStoryboardsByEpisodeIdOrdered(episode.id)
     const storyboardIds = storyboards.map((item) => item.id)
-    const images = storyboardIds.length
-      ? db.select().from(schema.imageGenerations).where(inArray(schema.imageGenerations.storyboardId, storyboardIds)).all()
-      : []
-    const videos = storyboardIds.length
-      ? db.select().from(schema.videoGenerations).where(inArray(schema.videoGenerations.storyboardId, storyboardIds)).all()
-      : []
-    const merges = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.episodeId, episode.id)).all()
+    const [images, videos, merges] = await Promise.all([
+      listImageGenerationsByStoryboardIds(storyboardIds),
+      listVideoGenerationsByStoryboardIds(storyboardIds),
+      listVideoMergesByEpisodeId(episode.id),
+    ])
 
     tasks.push(
       ...images.map((item) => ({

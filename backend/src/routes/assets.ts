@@ -1,8 +1,12 @@
 import { Hono } from 'hono'
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
-import { db, schema } from '../db/index.js'
 import { success } from '../utils/response.js'
+import {
+  listAssetsByDramaId,
+  listAssetsByDramaIdAndType,
+  listAssetsByDramaIds,
+  listAssetsByDramaIdsAndType,
+} from '../db/repos/studio-content.js'
 import { getScopedDrama, listScopedDramaIds } from '../integrations/trendshort/scope.js'
 
 const app = new Hono()
@@ -13,7 +17,7 @@ app.get('/', async (c) => {
   const page = Number(c.req.query('page') || 1)
   const pageSize = Number(c.req.query('page_size') || 20)
 
-  const filters = [isNull(schema.assets.deletedAt)]
+  let rows
   if (dramaId) {
     const drama = await getScopedDrama(c, dramaId)
     if (!drama) {
@@ -27,7 +31,9 @@ app.get('/', async (c) => {
         },
       })
     }
-    filters.push(eq(schema.assets.dramaId, dramaId))
+    rows = type
+      ? await listAssetsByDramaIdAndType(dramaId, type)
+      : await listAssetsByDramaId(dramaId)
   } else {
     const dramaIds = await listScopedDramaIds(c)
     if (!dramaIds.length) {
@@ -41,13 +47,10 @@ app.get('/', async (c) => {
         },
       })
     }
-    filters.push(inArray(schema.assets.dramaId, dramaIds))
+    rows = type
+      ? await listAssetsByDramaIdsAndType(dramaIds, type)
+      : await listAssetsByDramaIds(dramaIds)
   }
-  if (type) {
-    filters.push(eq(schema.assets.type, type))
-  }
-
-  const rows = db.select().from(schema.assets).where(and(...filters)).orderBy(desc(schema.assets.createdAt)).all()
   const total = rows.length
   const items = rows.slice((page - 1) * pageSize, page * pageSize).map((item) => ({
     id: item.id,

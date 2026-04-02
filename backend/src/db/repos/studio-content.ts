@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import { db, schema } from '../index.js'
 
@@ -149,6 +149,89 @@ export async function listVideoMergesByEpisodeId(episodeId: number) {
   return db.select()
     .from(schema.videoMerges)
     .where(eq(schema.videoMerges.episodeId, episodeId))
+    .all()
+}
+
+export async function listImageGenerationsByDramaId(dramaId: number) {
+  return db.select()
+    .from(schema.imageGenerations)
+    .where(eq(schema.imageGenerations.dramaId, dramaId))
+    .all()
+}
+
+export async function listVideoGenerationsByDramaId(dramaId: number) {
+  return db.select()
+    .from(schema.videoGenerations)
+    .where(eq(schema.videoGenerations.dramaId, dramaId))
+    .all()
+}
+
+export async function listVideoMergesByDramaId(dramaId: number) {
+  return db.select()
+    .from(schema.videoMerges)
+    .where(eq(schema.videoMerges.dramaId, dramaId))
+    .all()
+}
+
+export async function listImageGenerationsByStoryboardIds(storyboardIds: number[]) {
+  if (!storyboardIds.length) return []
+  return db.select()
+    .from(schema.imageGenerations)
+    .where(inArray(schema.imageGenerations.storyboardId, storyboardIds))
+    .all()
+}
+
+export async function listVideoGenerationsByStoryboardIds(storyboardIds: number[]) {
+  if (!storyboardIds.length) return []
+  return db.select()
+    .from(schema.videoGenerations)
+    .where(inArray(schema.videoGenerations.storyboardId, storyboardIds))
+    .all()
+}
+
+export async function listAssetsByDramaIds(dramaIds: number[]) {
+  if (!dramaIds.length) return []
+  return db.select()
+    .from(schema.assets)
+    .where(and(isNull(schema.assets.deletedAt), inArray(schema.assets.dramaId, dramaIds)))
+    .orderBy(desc(schema.assets.createdAt))
+    .all()
+}
+
+export async function listAssetsByDramaId(dramaId: number) {
+  return db.select()
+    .from(schema.assets)
+    .where(and(isNull(schema.assets.deletedAt), eq(schema.assets.dramaId, dramaId)))
+    .orderBy(desc(schema.assets.createdAt))
+    .all()
+}
+
+export async function listAssetsByDramaIdsAndType(dramaIds: number[], type: string) {
+  if (!dramaIds.length) return []
+  return db.select()
+    .from(schema.assets)
+    .where(
+      and(
+        isNull(schema.assets.deletedAt),
+        inArray(schema.assets.dramaId, dramaIds),
+        eq(schema.assets.type, type),
+      ),
+    )
+    .orderBy(desc(schema.assets.createdAt))
+    .all()
+}
+
+export async function listAssetsByDramaIdAndType(dramaId: number, type: string) {
+  return db.select()
+    .from(schema.assets)
+    .where(
+      and(
+        isNull(schema.assets.deletedAt),
+        eq(schema.assets.dramaId, dramaId),
+        eq(schema.assets.type, type),
+      ),
+    )
+    .orderBy(desc(schema.assets.createdAt))
     .all()
 }
 
