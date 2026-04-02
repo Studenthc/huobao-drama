@@ -1,8 +1,19 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, notFound, badRequest, now } from '../utils/response.js'
 import { toSnakeCaseArray, toSnakeCase } from '../utils/transform.js'
+import {
+  createEpisode,
+  listCharactersByDramaId,
+  listEpisodeCharacterLinks,
+  listEpisodeSceneLinks,
+  listEpisodesByDramaIdOrdered,
+  listScenesByDramaId,
+  listStoryboardCharacterLinks,
+  listStoryboardsByEpisodeIdOrdered,
+  listVideoMergesByEpisodeId,
+  updateEpisode,
+} from '../db/repos/studio-content.js'
 import { getScopedDrama, getScopedEpisode } from '../integrations/trendshort/scope.js'
 
 const app = new Hono()
@@ -19,12 +30,10 @@ app.post('/', async (c) => {
   const ts = now()
 
   // Get next episode number
-  const existing = db.select().from(schema.episodes)
-    .where(eq(schema.episodes.dramaId, body.drama_id))
-    .orderBy(schema.episodes.episodeNumber).all()
+  const existing = await listEpisodesByDramaIdOrdered(Number(body.drama_id))
   const nextNum = existing.length ? Math.max(...existing.map(e => e.episodeNumber)) + 1 : 1
 
-  const res = db.insert(schema.episodes).values({
+  const ep = await createEpisode({
     dramaId: body.drama_id,
     episodeNumber: nextNum,
     title: body.title || `第${nextNum}集`,
@@ -33,10 +42,8 @@ app.post('/', async (c) => {
     audioConfigId,
     createdAt: ts,
     updatedAt: ts,
-  }).run()
-
-  const [ep] = db.select().from(schema.episodes)
-    .where(eq(schema.episodes.id, Number(res.lastInsertRowid))).all()
+  })
+  if (!ep) return badRequest(c, 'Episode create failed')
   return success(c, {
     id: ep.id,
     episode_number: ep.episodeNumber,
@@ -69,7 +76,7 @@ app.put('/:id', async (c) => {
   if ('description' in updates) drizzleUpdates.description = updates.description
   if ('status' in updates) drizzleUpdates.status = updates.status
 
-  await db.update(schema.episodes).set(drizzleUpdates).where(eq(schema.episodes.id, id))
+  await updateEpisode(id, drizzleUpdates)
   return success(c)
 })
 
@@ -78,11 +85,10 @@ app.get('/:id/characters', async (c) => {
   const episodeId = Number(c.req.param('id'))
   const episode = await getScopedEpisode(c, episodeId)
   if (!episode) return notFound(c, 'Episode not found')
-  const links = db.select().from(schema.episodeCharacters)
-    .where(eq(schema.episodeCharacters.episodeId, episodeId)).all()
+  const links = await listEpisodeCharacterLinks(episodeId)
   const charIds = links.map(l => l.characterId)
   if (!charIds.length) return success(c, [])
-  const allChars = db.select().from(schema.characters).all()
+  const allChars = await listCharactersByDramaId(episode.dramaId)
   const result = allChars.filter(ch => charIds.includes(ch.id) && !ch.deletedAt)
   return success(c, toSnakeCaseArray(result))
 })
@@ -92,11 +98,10 @@ app.get('/:id/scenes', async (c) => {
   const episodeId = Number(c.req.param('id'))
   const episode = await getScopedEpisode(c, episodeId)
   if (!episode) return notFound(c, 'Episode not found')
-  const links = db.select().from(schema.episodeScenes)
-    .where(eq(schema.episodeScenes.episodeId, episodeId)).all()
+  const links = await listEpisodeSceneLinks(episodeId)
   const sceneIds = links.map(l => l.sceneId)
   if (!sceneIds.length) return success(c, [])
-  const allScenes = db.select().from(schema.scenes).all()
+  const allScenes = await listScenesByDramaId(episode.dramaId)
   const result = allScenes.filter(sc => sceneIds.includes(sc.id) && !sc.deletedAt)
   return success(c, toSnakeCaseArray(result))
 })
@@ -106,11 +111,8 @@ app.get('/:episode_id/storyboards', async (c) => {
   const episodeId = Number(c.req.param('episode_id'))
   const episode = await getScopedEpisode(c, episodeId)
   if (!episode) return notFound(c, 'Episode not found')
-  const rows = db.select().from(schema.storyboards)
-    .where(eq(schema.storyboards.episodeId, episodeId))
-    .orderBy(schema.storyboards.storyboardNumber)
-    .all()
-  const links = db.select().from(schema.storyboardCharacters).all()
+  const rows = await listStoryboardsByEpisodeIdOrdered(episodeId)
+  const links = await listStoryboardCharacterLinks()
   const charIdsByStoryboard = new Map<number, number[]>()
   for (const link of links) {
     const arr = charIdsByStoryboard.get(link.storyboardId) || []
@@ -118,10 +120,8 @@ app.get('/:episode_id/storyboards', async (c) => {
     charIdsByStoryboard.set(link.storyboardId, arr)
   }
 
-  const episodeCharIds = db.select().from(schema.episodeCharacters)
-    .where(eq(schema.episodeCharacters.episodeId, episodeId)).all()
-    .map(link => link.characterId)
-  const allChars = db.select().from(schema.characters).all()
+  const episodeCharIds = (await listEpisodeCharacterLinks(episodeId)).map(link => link.characterId)
+  const allChars = (await listCharactersByDramaId(episode.dramaId))
     .filter(ch => episodeCharIds.includes(ch.id) && !ch.deletedAt)
 
   return success(c, rows.map((row) => ({
@@ -139,10 +139,12 @@ app.get('/:id/pipeline-status', async (c) => {
   const ep = await getScopedEpisode(c, episodeId)
   if (!ep) return notFound(c, 'Episode not found')
 
-  const chars = db.select().from(schema.characters).where(eq(schema.characters.dramaId, ep.dramaId)).all()
-  const scenes = db.select().from(schema.scenes).where(eq(schema.scenes.dramaId, ep.dramaId)).all()
-  const sbs = db.select().from(schema.storyboards).where(eq(schema.storyboards.episodeId, episodeId)).all()
-  const merges = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.episodeId, episodeId)).all()
+  const [chars, scenes, sbs, merges] = await Promise.all([
+    listCharactersByDramaId(ep.dramaId),
+    listScenesByDramaId(ep.dramaId),
+    listStoryboardsByEpisodeIdOrdered(episodeId),
+    listVideoMergesByEpisodeId(episodeId),
+  ])
 
   const charsWithVoice = chars.filter(c => c.voiceStyle)
   const charsWithSample = chars.filter(c => c.voiceSampleUrl)

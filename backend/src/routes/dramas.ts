@@ -4,6 +4,21 @@ import { db, schema } from '../db/index.js'
 import { success, badRequest, notFound, created, now } from '../utils/response.js'
 import { toSnakeCase, toSnakeCaseArray } from '../utils/transform.js'
 import {
+  createDrama,
+  createEpisode,
+  getDramaById,
+  listCharactersByDramaId,
+  listEpisodesByDramaId,
+  listLegacyDramas,
+  listOwnedDramasByWorkspace,
+  listPropsByDramaId,
+  listScenesByDramaId,
+  listWorkspaceDramas,
+  saveDramaCharacters,
+  saveDramaEpisodes,
+  updateDrama,
+} from '../db/repos/studio-content.js'
+import {
   claimLegacyDramaOwnershipByIds,
   getScopedDrama,
   getTrendShortOwnership,
@@ -21,28 +36,8 @@ app.get('/', async (c) => {
   const keyword = c.req.query('keyword')
   const studioContext = getStudioContext(c)
 
-  const allRows = await db.select()
-    .from(schema.dramas)
-    .where(
-      and(
-        isNull(schema.dramas.deletedAt),
-        eq(schema.dramas.appWorkspaceId, studioContext.session.workspace_id),
-      ),
-    )
-    .orderBy(desc(schema.dramas.updatedAt))
-    .all()
-
-  const legacyRows = await db.select()
-    .from(schema.dramas)
-    .where(
-      and(
-        isNull(schema.dramas.deletedAt),
-        isNull(schema.dramas.appWorkspaceId),
-        isNull(schema.dramas.appUserId),
-      ),
-    )
-    .orderBy(desc(schema.dramas.updatedAt))
-    .all()
+  const allRows = await listOwnedDramasByWorkspace(studioContext.session.workspace_id)
+  const legacyRows = await listLegacyDramas()
 
   await claimLegacyDramaOwnershipByIds(studioContext, legacyRows.map((drama) => drama.id))
 
@@ -62,12 +57,11 @@ app.get('/', async (c) => {
 
   // Attach episode/character/scene counts
   const enriched = await Promise.all(items.map(async (drama) => {
-    const eps = await db.select().from(schema.episodes)
-      .where(eq(schema.episodes.dramaId, drama.id))
-    const chars = await db.select().from(schema.characters)
-      .where(eq(schema.characters.dramaId, drama.id))
-    const scns = await db.select().from(schema.scenes)
-      .where(eq(schema.scenes.dramaId, drama.id))
+    const [eps, chars, scns] = await Promise.all([
+      listEpisodesByDramaId(drama.id),
+      listCharactersByDramaId(drama.id),
+      listScenesByDramaId(drama.id),
+    ])
     return {
       ...toSnakeCase(drama),
       tags: drama.tags ? JSON.parse(drama.tags) : [],
@@ -89,7 +83,7 @@ app.post('/', async (c) => {
   const body = await c.req.json()
   const ts = now()
   const studioContext = getStudioContext(c)
-  const res = db.insert(schema.dramas).values({
+  const result = await createDrama({
     title: body.title,
     ...getTrendShortOwnership(studioContext),
     description: body.description,
@@ -100,22 +94,20 @@ app.post('/', async (c) => {
     status: 'draft',
     createdAt: ts,
     updatedAt: ts,
-  }).run()
-
-  const [result] = db.select().from(schema.dramas)
-    .where(eq(schema.dramas.id, Number(res.lastInsertRowid))).all()
+  })
+  if (!result) return badRequest(c, '创建剧本失败')
 
   // Create default episodes
   const totalEpisodes = body.total_episodes || 1
   for (let i = 1; i <= totalEpisodes; i++) {
-    db.insert(schema.episodes).values({
+    await createEpisode({
       dramaId: result.id,
       episodeNumber: i,
       title: `第${i}集`,
       status: 'draft',
       createdAt: ts,
       updatedAt: ts,
-    }).run()
+    })
   }
 
   return created(c, toSnakeCase(result))
@@ -126,7 +118,7 @@ app.post('/', async (c) => {
 app.get('/stats', async (c) => {
   const dramaIds = await listScopedDramaIds(c)
   const all = dramaIds.length
-    ? db.select().from(schema.dramas).where(and(isNull(schema.dramas.deletedAt), eq(schema.dramas.appWorkspaceId, getStudioContext(c).session.workspace_id))).all()
+    ? await listWorkspaceDramas(getStudioContext(c).session.workspace_id)
     : []
   const byStatus = Object.entries(
     all.reduce((acc, d) => {
@@ -142,7 +134,7 @@ app.get('/:id/stats', async (c) => {
   const drama = await getScopedDrama(c, id)
   if (!drama) return notFound(c, '剧本不存在')
 
-  const episodes = await db.select().from(schema.episodes).where(eq(schema.episodes.dramaId, id))
+  const episodes = await listEpisodesByDramaId(id)
   const videos = await db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.dramaId, id))
 
   return success(c, {
@@ -158,14 +150,12 @@ app.get('/:id', async (c) => {
   const drama = await getScopedDrama(c, id)
   if (!drama) return notFound(c, '剧本不存在')
 
-  const eps = await db.select().from(schema.episodes)
-    .where(eq(schema.episodes.dramaId, id))
-  const chars = await db.select().from(schema.characters)
-    .where(eq(schema.characters.dramaId, id))
-  const scns = await db.select().from(schema.scenes)
-    .where(eq(schema.scenes.dramaId, id))
-  const prps = await db.select().from(schema.props)
-    .where(eq(schema.props.dramaId, id))
+  const [eps, chars, scns, prps] = await Promise.all([
+    listEpisodesByDramaId(id),
+    listCharactersByDramaId(id),
+    listScenesByDramaId(id),
+    listPropsByDramaId(id),
+  ])
 
   return success(c, {
     ...toSnakeCase(drama),
@@ -191,7 +181,7 @@ app.put('/:id', async (c) => {
   if (body.status !== undefined) updates.status = body.status
   if (body.tags !== undefined) updates.tags = JSON.stringify(body.tags)
   if (body.metadata !== undefined) updates.metadata = body.metadata
-  db.update(schema.dramas).set(updates).where(eq(schema.dramas.id, id)).run()
+  await updateDrama(id, updates)
   return success(c)
 })
 
@@ -200,7 +190,7 @@ app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const drama = await getScopedDrama(c, id)
   if (!drama) return notFound(c, '剧本不存在')
-  await db.update(schema.dramas).set({ deletedAt: now() }).where(eq(schema.dramas.id, id))
+  await updateDrama(id, { deletedAt: now() })
   return success(c)
 })
 
@@ -213,13 +203,7 @@ app.put('/:id/characters', async (c) => {
   const chars = body.characters || []
   const ts = now()
 
-  for (const char of chars) {
-    if (char.id) {
-      await db.update(schema.characters).set({ ...char, updatedAt: ts }).where(eq(schema.characters.id, char.id))
-    } else {
-      await db.insert(schema.characters).values({ ...char, dramaId, createdAt: ts, updatedAt: ts })
-    }
-  }
+  await saveDramaCharacters(dramaId, chars, ts)
   return success(c)
 })
 
@@ -232,20 +216,7 @@ app.put('/:id/episodes', async (c) => {
   const episodes = body.episodes || []
   const ts = now()
 
-  for (const ep of episodes) {
-    if (ep.id) {
-      await db.update(schema.episodes).set({ ...ep, updatedAt: ts }).where(eq(schema.episodes.id, ep.id))
-    } else {
-      await db.insert(schema.episodes).values({
-        ...ep,
-        dramaId,
-        episodeNumber: ep.episode_number || ep.episodeNumber || 1,
-        title: ep.title || '未命名',
-        createdAt: ts,
-        updatedAt: ts,
-      })
-    }
-  }
+  await saveDramaEpisodes(dramaId, episodes, ts)
   return success(c)
 })
 

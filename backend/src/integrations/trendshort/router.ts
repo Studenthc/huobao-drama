@@ -1,8 +1,7 @@
 import { Hono } from 'hono'
 import { deleteCookie, setCookie } from 'hono/cookie'
-import { eq } from 'drizzle-orm'
 
-import { db, schema } from '../../db/index.js'
+import { getEpisodeById } from '../../db/repos/studio-content.js'
 import { getStudioContext, requireStudioAuth } from './auth.js'
 import { badRequest, success } from '../../utils/response.js'
 import {
@@ -14,7 +13,7 @@ import {
 
 const app = new Hono()
 
-function normalizeLegacyPath(nextPath: string | null | undefined, fallbackDramaId: number) {
+async function normalizeLegacyPath(nextPath: string | null | undefined, fallbackDramaId: number) {
   if (!nextPath?.trim()) {
     return `/drama/${fallbackDramaId}`
   }
@@ -33,7 +32,7 @@ function normalizeLegacyPath(nextPath: string | null | undefined, fallbackDramaI
   const episodeMatch = trimmed.match(/^\/episodes\/(\d+)(?:\/edit|\/storyboard)?$/) || trimmed.match(/^\/timeline\/(\d+)$/)
   if (episodeMatch) {
     const episodeId = Number(episodeMatch[1])
-    const [episode] = db.select().from(schema.episodes).where(eq(schema.episodes.id, episodeId)).all()
+    const episode = await getEpisodeById(episodeId)
     if (episode) {
       return `/drama/${episode.dramaId}/episode/${episode.episodeNumber}`
     }
@@ -71,7 +70,7 @@ app.post('/sso/exchange', async (c) => {
 
   return success(c, {
     session,
-    redirect_to: normalizeLegacyPath(body.next, session.drama_id),
+    redirect_to: await normalizeLegacyPath(body.next, session.drama_id),
   })
 })
 
