@@ -1,5 +1,3 @@
-import { db, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
 import { getActiveConfig, getConfigById } from './ai.js'
 import { now } from '../utils/response.js'
 import { downloadFile, readImageAsCompressedDataUrl, saveBase64Image } from '../utils/storage.js'
@@ -8,6 +6,14 @@ import type { AIConfig } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
 import type { StudioRequestContext } from '../integrations/trendshort/index.js'
 import { finalizeStudioAction, refundStudioAction } from '../integrations/trendshort/index.js'
+import {
+  createImageGeneration,
+  getImageGenerationById,
+  updateCharacter,
+  updateImageGeneration,
+  updateScene,
+  updateStoryboard,
+} from '../db/repos/studio-content.js'
 
 interface GenerateImageParams {
   storyboardId?: number
@@ -32,7 +38,7 @@ export async function generateImage(params: GenerateImageParams): Promise<number
     : getActiveConfig('image')
   if (!config) throw new Error('No active image AI config')
 
-  const res = db.insert(schema.imageGenerations).values({
+  const record = await createImageGeneration({
     storyboardId: params.storyboardId,
     dramaId: params.dramaId,
     sceneId: params.sceneId,
@@ -49,9 +55,10 @@ export async function generateImage(params: GenerateImageParams): Promise<number
     status: 'processing',
     createdAt: ts,
     updatedAt: ts,
-  }).run()
+  })
 
-  const lastId = Number(res.lastInsertRowid)
+  if (!record) throw new Error('Failed to persist image generation')
+  const lastId = record.id
   logTaskStart('ImageTask', 'enqueue', {
     id: lastId,
     provider: config.provider,
@@ -81,8 +88,7 @@ async function processImageGeneration(id: number, config: AIConfig) {
   const adapter = getImageAdapter(config.provider)
 
   try {
-    const rows = db.select().from(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).all()
-    const record = rows[0]
+    const record = await getImageGenerationById(id)
     if (!record) return
     logTaskProgress('ImageTask', 'build-request', {
       id,
@@ -154,10 +160,7 @@ async function processImageGeneration(id: number, config: AIConfig) {
     }
 
     // 异步模式：更新 taskId，开始轮询
-    db.update(schema.imageGenerations)
-      .set({ taskId, status: 'processing', updatedAt: now() })
-      .where(eq(schema.imageGenerations.id, id))
-      .run()
+    await updateImageGeneration(id, { taskId, status: 'processing', updatedAt: now() })
     logTaskProgress('ImageTask', 'poll-start', { id, taskId, provider: config.provider })
     pollImageTask(id, config, taskId!)
   } catch (err: any) {
@@ -273,14 +276,10 @@ async function pollImageTask(id: number, config: AIConfig, taskId: string) {
 
 async function handleImageComplete(id: number, provider: string, imageUrl: string) {
   const localPath = await downloadFile(imageUrl, 'images')
-  const rows = db.select().from(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).all()
-  const record = rows[0]
+  const record = await getImageGenerationById(id)
   if (!record) return
 
-  db.update(schema.imageGenerations)
-    .set({ imageUrl, localPath, status: 'completed', updatedAt: now() })
-    .where(eq(schema.imageGenerations.id, id))
-    .run()
+  await updateImageGeneration(id, { imageUrl, localPath, status: 'completed', updatedAt: now() })
   logTaskSuccess('ImageTask', 'downloaded', { id, provider, localPath })
 
   // 更新关联表
@@ -289,13 +288,13 @@ async function handleImageComplete(id: number, provider: string, imageUrl: strin
     if (record.frameType === 'first_frame') sbUpdate.firstFrameImage = localPath
     else if (record.frameType === 'last_frame') sbUpdate.lastFrameImage = localPath
     else sbUpdate.composedImage = localPath
-    db.update(schema.storyboards).set(sbUpdate).where(eq(schema.storyboards.id, record.storyboardId)).run()
+    await updateStoryboard(record.storyboardId, sbUpdate)
   }
   if (record?.characterId) {
-    db.update(schema.characters).set({ imageUrl: localPath, updatedAt: now() }).where(eq(schema.characters.id, record.characterId)).run()
+    await updateCharacter(record.characterId, { imageUrl: localPath, updatedAt: now() })
   }
   if (record?.sceneId) {
-    db.update(schema.scenes).set({ imageUrl: localPath, status: 'completed', updatedAt: now() }).where(eq(schema.scenes.id, record.sceneId)).run()
+    await updateScene(record.sceneId, { imageUrl: localPath, status: 'completed', updatedAt: now() })
   }
 
   if (record.appProjectId && record.appUserId && record.studioAuthorizationId) {
@@ -324,14 +323,10 @@ async function handleImageComplete(id: number, provider: string, imageUrl: strin
 
 async function handleImageCompleteBase64(id: number, provider: string, base64Data: string, mimeType: string) {
   const localPath = await saveBase64Image(base64Data, mimeType, 'images')
-  const rows = db.select().from(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).all()
-  const record = rows[0]
+  const record = await getImageGenerationById(id)
   if (!record) return
 
-  db.update(schema.imageGenerations)
-    .set({ localPath, status: 'completed', updatedAt: now() })
-    .where(eq(schema.imageGenerations.id, id))
-    .run()
+  await updateImageGeneration(id, { localPath, status: 'completed', updatedAt: now() })
   logTaskSuccess('ImageTask', 'saved-base64', { id, provider, mimeType, localPath })
 
   // 更新关联表
@@ -340,13 +335,13 @@ async function handleImageCompleteBase64(id: number, provider: string, base64Dat
     if (record.frameType === 'first_frame') sbUpdate.firstFrameImage = localPath
     else if (record.frameType === 'last_frame') sbUpdate.lastFrameImage = localPath
     else sbUpdate.composedImage = localPath
-    db.update(schema.storyboards).set(sbUpdate).where(eq(schema.storyboards.id, record.storyboardId)).run()
+    await updateStoryboard(record.storyboardId, sbUpdate)
   }
   if (record?.characterId) {
-    db.update(schema.characters).set({ imageUrl: localPath, updatedAt: now() }).where(eq(schema.characters.id, record.characterId)).run()
+    await updateCharacter(record.characterId, { imageUrl: localPath, updatedAt: now() })
   }
   if (record?.sceneId) {
-    db.update(schema.scenes).set({ imageUrl: localPath, status: 'completed', updatedAt: now() }).where(eq(schema.scenes.id, record.sceneId)).run()
+    await updateScene(record.sceneId, { imageUrl: localPath, status: 'completed', updatedAt: now() })
   }
 
   if (record.appProjectId && record.appUserId && record.studioAuthorizationId) {
@@ -374,13 +369,9 @@ async function handleImageCompleteBase64(id: number, provider: string, base64Dat
 }
 
 async function markImageFailed(id: number, message: string) {
-  const rows = db.select().from(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).all()
-  const record = rows[0]
+  const record = await getImageGenerationById(id)
 
-  db.update(schema.imageGenerations)
-    .set({ status: 'failed', errorMsg: message, updatedAt: now() })
-    .where(eq(schema.imageGenerations.id, id))
-    .run()
+  await updateImageGeneration(id, { status: 'failed', errorMsg: message, updatedAt: now() })
 
   if (record?.appProjectId && record.appUserId && record.studioAuthorizationId) {
     const studioContext: StudioRequestContext = {

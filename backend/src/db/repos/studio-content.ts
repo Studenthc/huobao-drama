@@ -235,6 +235,111 @@ export async function listAssetsByDramaIdAndType(dramaId: number, type: string) 
     .all()
 }
 
+export async function getStoryboardById(id: number) {
+  const [row] = db.select()
+    .from(schema.storyboards)
+    .where(eq(schema.storyboards.id, id))
+    .all()
+  return row ?? null
+}
+
+export async function updateStoryboard(id: number, updates: Partial<typeof schema.storyboards.$inferInsert>) {
+  db.update(schema.storyboards).set(updates).where(eq(schema.storyboards.id, id)).run()
+}
+
+export async function updateCharacter(id: number, updates: Partial<typeof schema.characters.$inferInsert>) {
+  db.update(schema.characters).set(updates).where(eq(schema.characters.id, id)).run()
+}
+
+export async function updateScene(id: number, updates: Partial<typeof schema.scenes.$inferInsert>) {
+  db.update(schema.scenes).set(updates).where(eq(schema.scenes.id, id)).run()
+}
+
+export async function createImageGeneration(values: typeof schema.imageGenerations.$inferInsert) {
+  const res = db.insert(schema.imageGenerations).values(values).run()
+  const [row] = db.select()
+    .from(schema.imageGenerations)
+    .where(eq(schema.imageGenerations.id, Number(res.lastInsertRowid)))
+    .all()
+  return row ?? null
+}
+
+export async function getImageGenerationById(id: number) {
+  const [row] = db.select()
+    .from(schema.imageGenerations)
+    .where(eq(schema.imageGenerations.id, id))
+    .all()
+  return row ?? null
+}
+
+export async function updateImageGeneration(id: number, updates: Partial<typeof schema.imageGenerations.$inferInsert>) {
+  db.update(schema.imageGenerations).set(updates).where(eq(schema.imageGenerations.id, id)).run()
+}
+
+export async function listImageGenerations(filters?: { storyboardId?: number; dramaId?: number }) {
+  let rows = db.select().from(schema.imageGenerations).all()
+  if (filters?.storyboardId != null) rows = rows.filter((row) => row.storyboardId === filters.storyboardId)
+  if (filters?.dramaId != null) rows = rows.filter((row) => row.dramaId === filters.dramaId)
+  return rows
+}
+
+export async function deleteImageGeneration(id: number) {
+  db.delete(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).run()
+}
+
+export async function createVideoGeneration(values: typeof schema.videoGenerations.$inferInsert) {
+  const res = db.insert(schema.videoGenerations).values(values).run()
+  const [row] = db.select()
+    .from(schema.videoGenerations)
+    .where(eq(schema.videoGenerations.id, Number(res.lastInsertRowid)))
+    .all()
+  return row ?? null
+}
+
+export async function getVideoGenerationById(id: number) {
+  const [row] = db.select()
+    .from(schema.videoGenerations)
+    .where(eq(schema.videoGenerations.id, id))
+    .all()
+  return row ?? null
+}
+
+export async function updateVideoGeneration(id: number, updates: Partial<typeof schema.videoGenerations.$inferInsert>) {
+  db.update(schema.videoGenerations).set(updates).where(eq(schema.videoGenerations.id, id)).run()
+}
+
+export async function listVideoGenerations(filters?: { storyboardId?: number; dramaId?: number }) {
+  let rows = db.select().from(schema.videoGenerations).all()
+  if (filters?.storyboardId != null) rows = rows.filter((row) => row.storyboardId === filters.storyboardId)
+  if (filters?.dramaId != null) rows = rows.filter((row) => row.dramaId === filters.dramaId)
+  return rows
+}
+
+export async function deleteVideoGeneration(id: number) {
+  db.delete(schema.videoGenerations).where(eq(schema.videoGenerations.id, id)).run()
+}
+
+export async function createVideoMerge(values: typeof schema.videoMerges.$inferInsert) {
+  const res = db.insert(schema.videoMerges).values(values).run()
+  const [row] = db.select()
+    .from(schema.videoMerges)
+    .where(eq(schema.videoMerges.id, Number(res.lastInsertRowid)))
+    .all()
+  return row ?? null
+}
+
+export async function getVideoMergeById(id: number) {
+  const [row] = db.select()
+    .from(schema.videoMerges)
+    .where(eq(schema.videoMerges.id, id))
+    .all()
+  return row ?? null
+}
+
+export async function updateVideoMerge(id: number, updates: Partial<typeof schema.videoMerges.$inferInsert>) {
+  db.update(schema.videoMerges).set(updates).where(eq(schema.videoMerges.id, id)).run()
+}
+
 export async function saveDramaCharacters(
   dramaId: number,
   characters: Array<Record<string, unknown>>,

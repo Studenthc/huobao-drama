@@ -1,10 +1,15 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
-import { db, schema } from '../db/index.js'
 import { success, created, badRequest } from '../utils/response.js'
 import { generateVideo } from '../services/video-generation.js'
 import { logTaskError, logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { authorizeStudioAction, getStudioContext } from '../integrations/trendshort/index.js'
+import {
+  deleteVideoGeneration,
+  getEpisodeById,
+  getStoryboardById,
+  getVideoGenerationById,
+  listVideoGenerations,
+} from '../db/repos/studio-content.js'
 
 const app = new Hono()
 
@@ -17,9 +22,9 @@ app.post('/', async (c) => {
     const studioContext = getStudioContext(c)
     let configId: number | undefined = body.config_id
     if (body.storyboard_id) {
-      const [sb] = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, Number(body.storyboard_id))).all()
+      const sb = await getStoryboardById(Number(body.storyboard_id))
       if (sb) {
-        const [ep] = db.select().from(schema.episodes).where(eq(schema.episodes.id, sb.episodeId)).all()
+        const ep = await getEpisodeById(sb.episodeId)
         if (ep?.videoConfigId != null) configId = ep.videoConfigId
       }
     }
@@ -55,8 +60,7 @@ app.post('/', async (c) => {
       studioAuthorizationId: authorization?.authorizationId,
     })
 
-    const [record] = db.select().from(schema.videoGenerations)
-      .where(eq(schema.videoGenerations.id, id)).all()
+    const record = await getVideoGenerationById(id)
     logTaskSuccess('VideoAPI', 'generate', { generationId: id, provider: record?.provider })
     return created(c, record)
   } catch (err: any) {
@@ -68,8 +72,7 @@ app.post('/', async (c) => {
 // GET /videos/:id
 app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  const [row] = db.select().from(schema.videoGenerations)
-    .where(eq(schema.videoGenerations.id, id)).all()
+  const row = await getVideoGenerationById(id)
   return success(c, row || null)
 })
 
@@ -78,10 +81,10 @@ app.get('/', async (c) => {
   const storyboardId = c.req.query('storyboard_id')
   const dramaId = c.req.query('drama_id')
 
-  let rows = db.select().from(schema.videoGenerations).all()
-
-  if (storyboardId) rows = rows.filter(r => r.storyboardId === Number(storyboardId))
-  if (dramaId) rows = rows.filter(r => r.dramaId === Number(dramaId))
+  const rows = await listVideoGenerations({
+    storyboardId: storyboardId ? Number(storyboardId) : undefined,
+    dramaId: dramaId ? Number(dramaId) : undefined,
+  })
 
   return success(c, rows)
 })
@@ -89,7 +92,7 @@ app.get('/', async (c) => {
 // DELETE /videos/:id
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  db.delete(schema.videoGenerations).where(eq(schema.videoGenerations.id, id)).run()
+  await deleteVideoGeneration(id)
   return success(c)
 })
 

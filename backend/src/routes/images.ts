@@ -1,10 +1,15 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
-import { db, schema } from '../db/index.js'
 import { success, created, now, badRequest } from '../utils/response.js'
 import { generateImage } from '../services/image-generation.js'
 import { logTaskError, logTaskPayload, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import { authorizeStudioAction, getStudioContext } from '../integrations/trendshort/index.js'
+import {
+  deleteImageGeneration,
+  getEpisodeById,
+  getImageGenerationById,
+  getStoryboardById,
+  listImageGenerations,
+} from '../db/repos/studio-content.js'
 
 const app = new Hono()
 
@@ -17,9 +22,9 @@ app.post('/', async (c) => {
     const studioContext = getStudioContext(c)
     let configId: number | undefined = body.config_id
     if (body.storyboard_id) {
-      const [sb] = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, Number(body.storyboard_id))).all()
+      const sb = await getStoryboardById(Number(body.storyboard_id))
       if (sb) {
-        const [ep] = db.select().from(schema.episodes).where(eq(schema.episodes.id, sb.episodeId)).all()
+        const ep = await getEpisodeById(sb.episodeId)
         if (ep?.imageConfigId != null) configId = ep.imageConfigId
       }
     }
@@ -54,8 +59,7 @@ app.post('/', async (c) => {
       studioAuthorizationId: authorization?.authorizationId,
     })
 
-    const [record] = db.select().from(schema.imageGenerations)
-      .where(eq(schema.imageGenerations.id, id)).all()
+    const record = await getImageGenerationById(id)
     logTaskSuccess('ImageAPI', 'generate', { generationId: id, provider: record?.provider })
     return created(c, record)
   } catch (err: any) {
@@ -67,8 +71,7 @@ app.post('/', async (c) => {
 // GET /images/:id
 app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  const [row] = db.select().from(schema.imageGenerations)
-    .where(eq(schema.imageGenerations.id, id)).all()
+  const row = await getImageGenerationById(id)
   return success(c, row || null)
 })
 
@@ -77,10 +80,10 @@ app.get('/', async (c) => {
   const storyboardId = c.req.query('storyboard_id')
   const dramaId = c.req.query('drama_id')
 
-  let rows = db.select().from(schema.imageGenerations).all()
-
-  if (storyboardId) rows = rows.filter(r => r.storyboardId === Number(storyboardId))
-  if (dramaId) rows = rows.filter(r => r.dramaId === Number(dramaId))
+  const rows = await listImageGenerations({
+    storyboardId: storyboardId ? Number(storyboardId) : undefined,
+    dramaId: dramaId ? Number(dramaId) : undefined,
+  })
 
   return success(c, rows)
 })
@@ -88,7 +91,7 @@ app.get('/', async (c) => {
 // DELETE /images/:id
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
-  db.delete(schema.imageGenerations).where(eq(schema.imageGenerations.id, id)).run()
+  await deleteImageGeneration(id)
   return success(c)
 })
 

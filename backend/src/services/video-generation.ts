@@ -1,5 +1,3 @@
-import { db, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
 import { getActiveConfig, getConfigById } from './ai.js'
 import { now } from '../utils/response.js'
 import { downloadFile, readImageAsCompressedDataUrl } from '../utils/storage.js'
@@ -8,6 +6,12 @@ import type { AIConfig } from './adapters/types'
 import { logTaskError, logTaskPayload, logTaskProgress, logTaskStart, logTaskSuccess, logTaskWarn, redactUrl } from '../utils/task-logger.js'
 import type { StudioRequestContext } from '../integrations/trendshort/index.js'
 import { finalizeStudioAction, refundStudioAction } from '../integrations/trendshort/index.js'
+import {
+  createVideoGeneration,
+  getVideoGenerationById,
+  updateStoryboard,
+  updateVideoGeneration,
+} from '../db/repos/studio-content.js'
 
 interface GenerateVideoParams {
   storyboardId?: number
@@ -34,7 +38,7 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
     : getActiveConfig('video')
   if (!config) throw new Error('No active video AI config')
 
-  const res = db.insert(schema.videoGenerations).values({
+  const record = await createVideoGeneration({
     storyboardId: params.storyboardId,
     dramaId: params.dramaId,
     prompt: params.prompt,
@@ -53,9 +57,10 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
     status: 'processing',
     createdAt: ts,
     updatedAt: ts,
-  }).run()
+  })
 
-  const lastId = Number(res.lastInsertRowid)
+  if (!record) throw new Error('Failed to persist video generation')
+  const lastId = record.id
   logTaskStart('VideoTask', 'enqueue', {
     id: lastId,
     provider: config.provider,
@@ -84,8 +89,7 @@ async function processVideoGeneration(id: number, config: AIConfig) {
   const adapter = getVideoAdapter(config.provider)
 
   try {
-    const rows = db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.id, id)).all()
-    const record = rows[0]
+    const record = await getVideoGenerationById(id)
     if (!record) return
     logTaskProgress('VideoTask', 'build-request', {
       id,
@@ -147,10 +151,7 @@ async function processVideoGeneration(id: number, config: AIConfig) {
     }
 
     // 异步模式：更新 taskId，开始轮询
-    db.update(schema.videoGenerations)
-      .set({ taskId, status: 'processing', updatedAt: now() })
-      .where(eq(schema.videoGenerations.id, id))
-      .run()
+    await updateVideoGeneration(id, { taskId, status: 'processing', updatedAt: now() })
     logTaskProgress('VideoTask', 'poll-start', { id, taskId, provider: config.provider })
 
     // Vidu 没有轮询端点，跳过轮询（依赖 Webhook 回调）
@@ -242,21 +243,15 @@ async function pollVideoTask(id: number, config: AIConfig, taskId: string, story
 }
 
 async function handleVideoComplete(id: number, videoUrl: string, duration: number | null | undefined, storyboardId?: number | null) {
-  const [record] = db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.id, id)).all()
+  const record = await getVideoGenerationById(id)
   if (!record) return
 
   const localPath = await downloadFile(videoUrl, 'videos')
-  db.update(schema.videoGenerations)
-    .set({ videoUrl, localPath, status: 'completed', completedAt: now(), updatedAt: now() })
-    .where(eq(schema.videoGenerations.id, id))
-    .run()
+  await updateVideoGeneration(id, { videoUrl, localPath, status: 'completed', completedAt: now(), updatedAt: now() })
   logTaskSuccess('VideoTask', 'downloaded', { id, localPath, storyboardId, duration })
 
   if (storyboardId) {
-    db.update(schema.storyboards)
-      .set({ videoUrl: localPath, duration: duration || undefined, updatedAt: now() })
-      .where(eq(schema.storyboards.id, storyboardId))
-      .run()
+    await updateStoryboard(storyboardId, { videoUrl: localPath, duration: duration || undefined, updatedAt: now() })
   }
 
   if (record.appProjectId && record.appUserId && record.studioAuthorizationId) {
@@ -283,11 +278,8 @@ async function handleVideoComplete(id: number, videoUrl: string, duration: numbe
 }
 
 async function markVideoFailed(id: number, message: string) {
-  const [record] = db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.id, id)).all()
-  db.update(schema.videoGenerations)
-    .set({ status: 'failed', errorMsg: message, updatedAt: now() })
-    .where(eq(schema.videoGenerations.id, id))
-    .run()
+  const record = await getVideoGenerationById(id)
+  await updateVideoGeneration(id, { status: 'failed', errorMsg: message, updatedAt: now() })
 
   if (record?.appProjectId && record.appUserId && record.studioAuthorizationId) {
     const studioContext: StudioRequestContext = {

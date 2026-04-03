@@ -6,12 +6,17 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { v4 as uuid } from 'uuid'
-import { db, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
 import { now } from '../utils/response.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
 import type { StudioRequestContext } from '../integrations/trendshort/index.js'
 import { finalizeStudioAction, refundStudioAction } from '../integrations/trendshort/index.js'
+import {
+  createVideoMerge,
+  getVideoMergeById,
+  listStoryboardsByEpisodeIdOrdered,
+  updateEpisode,
+  updateVideoMerge,
+} from '../db/repos/studio-content.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const STORAGE_ROOT = process.env.STORAGE_PATH || path.resolve(__dirname, '../../../data/static')
@@ -35,10 +40,7 @@ export async function mergeEpisodeVideos(
     studioAuthorizationId?: string | null
   },
 ): Promise<number> {
-  const storyboards = db.select().from(schema.storyboards)
-    .where(eq(schema.storyboards.episodeId, episodeId))
-    .orderBy(schema.storyboards.storyboardNumber)
-    .all()
+  const storyboards = await listStoryboardsByEpisodeIdOrdered(episodeId)
 
   const composedStoryboards = storyboards.filter(sb => !!sb.composedVideoUrl)
   if (composedStoryboards.length !== storyboards.length) {
@@ -54,7 +56,7 @@ export async function mergeEpisodeVideos(
 
   // 创建 merge 记录
   const ts = now()
-  const res = db.insert(schema.videoMerges).values({
+  const record = await createVideoMerge({
     episodeId,
     dramaId,
     title: `Episode ${episodeId} Merge`,
@@ -66,8 +68,9 @@ export async function mergeEpisodeVideos(
     appUserId: studioMeta?.appUserId,
     studioAuthorizationId: studioMeta?.studioAuthorizationId,
     createdAt: ts,
-  }).run()
-  const mergeId = Number(res.lastInsertRowid)
+  })
+  if (!record) throw new Error('Failed to persist merge task')
+  const mergeId = record.id
 
   // 异步执行
   doMerge(mergeId, episodeId, videos).catch(err => {
@@ -125,18 +128,14 @@ async function doMerge(mergeId: number, episodeId: number, videos: string[]) {
   const mergedRelative = `static/merged/${outputFilename}`
 
   // 更新 merge 记录
-  db.update(schema.videoMerges)
-    .set({ status: 'completed', mergedUrl: mergedRelative, duration, completedAt: now() })
-    .where(eq(schema.videoMerges.id, mergeId)).run()
+  await updateVideoMerge(mergeId, { status: 'completed', mergedUrl: mergedRelative, duration, completedAt: now() })
 
   // 更新 episode
-  db.update(schema.episodes)
-    .set({ videoUrl: mergedRelative, updatedAt: now() })
-    .where(eq(schema.episodes.id, episodeId)).run()
+  await updateEpisode(episodeId, { videoUrl: mergedRelative, updatedAt: now() })
 
   logTaskSuccess('MergeTask', 'episode-merge', { mergeId, episodeId, output: mergedRelative, duration, clips: videos.length })
 
-  const [record] = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, mergeId)).all()
+  const record = await getVideoMergeById(mergeId)
   if (record?.appProjectId && record.appUserId && record.studioAuthorizationId) {
     const studioContext: StudioRequestContext = {
       authType: 'service',
@@ -161,10 +160,8 @@ async function doMerge(mergeId: number, episodeId: number, videos: string[]) {
 }
 
 async function markMergeFailed(mergeId: number, message: string) {
-  const [record] = db.select().from(schema.videoMerges).where(eq(schema.videoMerges.id, mergeId)).all()
-  db.update(schema.videoMerges)
-    .set({ status: 'failed', errorMsg: message })
-    .where(eq(schema.videoMerges.id, mergeId)).run()
+  const record = await getVideoMergeById(mergeId)
+  await updateVideoMerge(mergeId, { status: 'failed', errorMsg: message })
 
   if (record?.appProjectId && record.appUserId && record.studioAuthorizationId) {
     const studioContext: StudioRequestContext = {
