@@ -7,11 +7,15 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { execFileSync } from 'child_process'
 import { v4 as uuid } from 'uuid'
-import { db, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
 import { now } from '../utils/response.js'
 import { generateTTS } from './tts-generation.js'
 import { logTaskError, logTaskProgress, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
+import {
+  getEpisodeById,
+  getStoryboardById,
+  listCharactersByDramaId,
+  updateStoryboard,
+} from '../db/repos/studio-content.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const STORAGE_ROOT = process.env.STORAGE_PATH || path.resolve(__dirname, '../../../data/static')
@@ -51,13 +55,10 @@ function parseDialogueForTTS(dialogue?: string | null) {
  * 合成单个镜头：视频 + TTS对白音频 + 烧录字幕
  */
 export async function composeStoryboard(storyboardId: number): Promise<string> {
-  const [sb] = db.select().from(schema.storyboards).where(eq(schema.storyboards.id, storyboardId)).all()
+  const sb = await getStoryboardById(storyboardId)
   if (!sb) throw new Error(`Storyboard ${storyboardId} not found`)
   if (!sb.videoUrl) throw new Error(`Storyboard ${storyboardId} has no video`)
-  db.update(schema.storyboards)
-    .set({ status: 'compose_processing', composedVideoUrl: null, updatedAt: now() })
-    .where(eq(schema.storyboards.id, storyboardId))
-    .run()
+  await updateStoryboard(storyboardId, { status: 'compose_processing', composedVideoUrl: null, updatedAt: now() })
 
   logTaskStart('ComposeTask', 'storyboard-compose', {
     storyboardId,
@@ -82,12 +83,11 @@ export async function composeStoryboard(storyboardId: number): Promise<string> {
 
       if (!audioPath) {
         let voiceId = 'alloy'
-        const [ep] = db.select().from(schema.episodes).where(eq(schema.episodes.id, sb.episodeId)).all()
+        const ep = await getEpisodeById(sb.episodeId)
         if (parsedDialogue.speaker) {
           const charName = parsedDialogue.speaker
           if (ep) {
-            const chars = db.select().from(schema.characters)
-              .where(eq(schema.characters.dramaId, ep.dramaId)).all()
+            const chars = await listCharactersByDramaId(ep.dramaId)
             const found = chars.find(c => c.name === charName)
             if (found?.voiceStyle) voiceId = found.voiceStyle
           }
@@ -98,8 +98,7 @@ export async function composeStoryboard(storyboardId: number): Promise<string> {
           logTaskProgress('ComposeTask', 'generate-inline-tts', { storyboardId, voiceId, textPreview: pureDialogue.slice(0, 40) })
           const ttsPath = await generateTTS({ text: pureDialogue, voice: voiceId, configId: ep?.audioConfigId ?? undefined })
           audioPath = toAbsPath(ttsPath)
-          db.update(schema.storyboards).set({ ttsAudioUrl: ttsPath, updatedAt: now() })
-            .where(eq(schema.storyboards.id, storyboardId)).run()
+          await updateStoryboard(storyboardId, { ttsAudioUrl: ttsPath, updatedAt: now() })
         }
       }
     }
@@ -117,8 +116,7 @@ export async function composeStoryboard(storyboardId: number): Promise<string> {
       fs.writeFileSync(subtitlePath, srtContent, 'utf-8')
 
       const srtRelative = `static/subtitles/${srtFilename}`
-      db.update(schema.storyboards).set({ subtitleUrl: srtRelative, updatedAt: now() })
-        .where(eq(schema.storyboards.id, storyboardId)).run()
+      await updateStoryboard(storyboardId, { subtitleUrl: srtRelative, updatedAt: now() })
     }
 
     // 3. FFmpeg 合成
@@ -170,8 +168,7 @@ export async function composeStoryboard(storyboardId: number): Promise<string> {
     })
 
     const composedRelative = `static/composed/${outputFilename}`
-    db.update(schema.storyboards).set({ composedVideoUrl: composedRelative, status: 'compose_completed', updatedAt: now() })
-      .where(eq(schema.storyboards.id, storyboardId)).run()
+    await updateStoryboard(storyboardId, { composedVideoUrl: composedRelative, status: 'compose_completed', updatedAt: now() })
 
     logTaskSuccess('ComposeTask', 'storyboard-compose', {
       storyboardId,
@@ -180,10 +177,7 @@ export async function composeStoryboard(storyboardId: number): Promise<string> {
     })
     return composedRelative
   } catch (err) {
-    db.update(schema.storyboards)
-      .set({ status: 'compose_failed', composedVideoUrl: null, updatedAt: now() })
-      .where(eq(schema.storyboards.id, storyboardId))
-      .run()
+    await updateStoryboard(storyboardId, { status: 'compose_failed', composedVideoUrl: null, updatedAt: now() })
     throw err
   }
 }

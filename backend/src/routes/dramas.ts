@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { and, desc, eq, isNull } from 'drizzle-orm'
-import { db, schema } from '../db/index.js'
+import { db, queryAll, schema } from '../db/index.js'
 import { success, badRequest, notFound, created, now } from '../utils/response.js'
 import { toSnakeCase, toSnakeCaseArray } from '../utils/transform.js'
 import {
@@ -135,7 +135,9 @@ app.get('/:id/stats', async (c) => {
   if (!drama) return notFound(c, '剧本不存在')
 
   const episodes = await listEpisodesByDramaId(id)
-  const videos = await db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.dramaId, id))
+  const videos = await queryAll(
+    db.select().from(schema.videoGenerations).where(eq(schema.videoGenerations.dramaId, id)),
+  )
 
   return success(c, {
     total_episodes: episodes.length,

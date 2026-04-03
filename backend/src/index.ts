@@ -28,7 +28,7 @@ import assets from './routes/assets.js'
 import tasks from './routes/tasks.js'
 import { trendshortRouter, requireStudioAuth } from './integrations/trendshort/index.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
-import { hasNeonDatabaseUrl } from './db/neon-client.js'
+import { getDatabaseMode } from './db/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '../..')
@@ -47,7 +47,7 @@ app.use('*', errorHandler)
 app.get('/api/v1/health', (c) =>
   c.json({
     status: 'ok',
-    db_mode: hasNeonDatabaseUrl() ? 'postgres' : 'sqlite',
+    db_mode: getDatabaseMode(),
     timestamp: new Date().toISOString(),
   }),
 )
@@ -92,5 +92,5 @@ app.use('*', serveStatic({ root: distPath }))
 app.get('*', serveStatic({ root: distPath, path: 'index.html' }))
 
 const port = Number(process.env.PORT || 5679)
-console.log(`🚀 TrendShort Studio server on http://localhost:${port} (${hasNeonDatabaseUrl() ? 'postgres' : 'sqlite'})`)
+console.log(`🚀 TrendShort Studio server on http://localhost:${port} (${getDatabaseMode()})`)
 serve({ fetch: app.fetch, port })
