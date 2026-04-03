@@ -4,19 +4,20 @@
  * POST /api/v1/ai-voices/sync  - 从 MiniMax 同步音色
  */
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
-import { db, schema } from '../db/index.js'
 import { success, badRequest, now } from '../utils/response.js'
 import { joinProviderUrl } from '../services/adapters/url.js'
+import {
+  listAiServiceConfigsByServiceType,
+  listAiVoicesByProvider,
+  replaceAiVoicesForProvider,
+} from '../db/repos/studio-configs.js'
 
 const app = new Hono()
 
 // GET /ai-voices?provider=minimax
 app.get('/', async (c) => {
   const provider = c.req.query('provider') || 'minimax'
-  const rows = db.select().from(schema.aiVoices)
-    .where(eq(schema.aiVoices.provider, provider))
-    .all()
+  const rows = await listAiVoicesByProvider(provider)
 
   const parsed = rows.map(r => ({
     voice_id: r.voiceId,
@@ -32,9 +33,7 @@ app.get('/', async (c) => {
 // POST /ai-voices/sync
 app.post('/sync', async (c) => {
   // 从数据库获取 minimax 的音频配置
-  const rows = db.select().from(schema.aiServiceConfigs)
-    .where(eq(schema.aiServiceConfigs.serviceType, 'audio'))
-    .all()
+  const rows = (await listAiServiceConfigsByServiceType('audio'))
     .filter(r => r.isActive && r.provider === 'minimax')
 
   if (rows.length === 0) {
@@ -68,10 +67,6 @@ app.post('/sync', async (c) => {
   const voices = (result.system_voice || []).filter((v: any) => shouldKeepVoice(v))
   const ts = now()
 
-  // 先清空旧数据
-  db.delete(schema.aiVoices).where(eq(schema.aiVoices.provider, 'minimax')).run()
-
-  // 批量插入新数据
   const insertRows = voices.map((v: any) => ({
     voiceId: v.voice_id,
     voiceName: v.voice_name,
@@ -81,9 +76,7 @@ app.post('/sync', async (c) => {
     createdAt: ts,
   }))
 
-  if (insertRows.length > 0) {
-    db.insert(schema.aiVoices).values(insertRows).run()
-  }
+  await replaceAiVoicesForProvider('minimax', insertRows)
 
   return success(c, { count: insertRows.length, message: `Synced ${insertRows.length} voices` })
 })

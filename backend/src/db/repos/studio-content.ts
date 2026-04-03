@@ -398,6 +398,14 @@ export async function getVideoGenerationById(id: number) {
   )
 }
 
+export async function getVideoGenerationByTaskId(taskId: string) {
+  return queryFirst(
+    db.select()
+      .from(schema.videoGenerations)
+      .where(eq(schema.videoGenerations.taskId, taskId)),
+  )
+}
+
 export async function updateVideoGeneration(id: number, updates: Partial<typeof schema.videoGenerations.$inferInsert>) {
   await executeWrite(
     db.update(schema.videoGenerations).set(updates).where(eq(schema.videoGenerations.id, id)),
