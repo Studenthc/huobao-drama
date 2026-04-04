@@ -34,8 +34,8 @@ interface GenerateImageParams {
 export async function generateImage(params: GenerateImageParams): Promise<number> {
   const ts = now()
   const config = params.configId
-    ? getConfigById(params.configId)
-    : getActiveConfig('image')
+    ? await getConfigById(params.configId)
+    : await getActiveConfig('image')
   if (!config) throw new Error('No active image AI config')
 
   const record = await createImageGeneration({

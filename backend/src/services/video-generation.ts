@@ -34,8 +34,8 @@ interface GenerateVideoParams {
 export async function generateVideo(params: GenerateVideoParams): Promise<number> {
   const ts = now()
   const config = params.configId
-    ? getConfigById(params.configId)
-    : getActiveConfig('video')
+    ? await getConfigById(params.configId)
+    : await getActiveConfig('video')
   if (!config) throw new Error('No active video AI config')
 
   const record = await createVideoGeneration({

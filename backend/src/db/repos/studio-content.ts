@@ -164,11 +164,79 @@ export async function listEpisodeCharacterLinks(episodeId: number) {
   )
 }
 
+export async function ensureEpisodeCharacterLink(episodeId: number, characterId: number, createdAt: string) {
+  const existing = await queryFirst(
+    db.select()
+      .from(schema.episodeCharacters)
+      .where(
+        and(
+          eq(schema.episodeCharacters.episodeId, episodeId),
+          eq(schema.episodeCharacters.characterId, characterId),
+        ),
+      ),
+  )
+
+  if (existing) return existing
+
+  await executeWrite(
+    db.insert(schema.episodeCharacters).values({
+      episodeId,
+      characterId,
+      createdAt,
+    }),
+  )
+
+  return queryFirst(
+    db.select()
+      .from(schema.episodeCharacters)
+      .where(
+        and(
+          eq(schema.episodeCharacters.episodeId, episodeId),
+          eq(schema.episodeCharacters.characterId, characterId),
+        ),
+      ),
+  )
+}
+
 export async function listEpisodeSceneLinks(episodeId: number) {
   return queryAll(
     db.select()
       .from(schema.episodeScenes)
       .where(eq(schema.episodeScenes.episodeId, episodeId)),
+  )
+}
+
+export async function ensureEpisodeSceneLink(episodeId: number, sceneId: number, createdAt: string) {
+  const existing = await queryFirst(
+    db.select()
+      .from(schema.episodeScenes)
+      .where(
+        and(
+          eq(schema.episodeScenes.episodeId, episodeId),
+          eq(schema.episodeScenes.sceneId, sceneId),
+        ),
+      ),
+  )
+
+  if (existing) return existing
+
+  await executeWrite(
+    db.insert(schema.episodeScenes).values({
+      episodeId,
+      sceneId,
+      createdAt,
+    }),
+  )
+
+  return queryFirst(
+    db.select()
+      .from(schema.episodeScenes)
+      .where(
+        and(
+          eq(schema.episodeScenes.episodeId, episodeId),
+          eq(schema.episodeScenes.sceneId, sceneId),
+        ),
+      ),
   )
 }
 
@@ -188,6 +256,13 @@ export async function createStoryboard(values: typeof schema.storyboards.$inferI
 export async function deleteStoryboard(id: number) {
   await executeWrite(
     db.delete(schema.storyboards).where(eq(schema.storyboards.id, id)),
+  )
+}
+
+export async function deleteStoryboardsByEpisodeId(episodeId: number) {
+  await executeWrite(
+    db.delete(schema.storyboards)
+      .where(eq(schema.storyboards.episodeId, episodeId)),
   )
 }
 
@@ -347,6 +422,10 @@ export async function updateCharacter(id: number, updates: Partial<typeof schema
   await executeWrite(
     db.update(schema.characters).set(updates).where(eq(schema.characters.id, id)),
   )
+}
+
+export async function createCharacter(values: typeof schema.characters.$inferInsert) {
+  return insertAndReturnOne(schema.characters, values, schema.characters.id)
 }
 
 export async function updateScene(id: number, updates: Partial<typeof schema.scenes.$inferInsert>) {

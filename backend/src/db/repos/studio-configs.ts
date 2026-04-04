@@ -14,6 +14,13 @@ export async function listAiServiceConfigsByServiceType(serviceType: string) {
   )
 }
 
+export async function getPreferredActiveAiServiceConfig(serviceType: string) {
+  const rows = (await listAiServiceConfigsByServiceType(serviceType))
+    .filter((row) => row.isActive)
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0))
+  return rows[0] ?? null
+}
+
 export async function getAiServiceConfigById(id: number) {
   return queryFirst(
     db.select()
@@ -72,6 +79,12 @@ export async function getAgentConfigByType(agentType: string) {
       .from(schema.agentConfigs)
       .where(eq(schema.agentConfigs.agentType, agentType)),
   )
+}
+
+export async function getPreferredAgentConfigByType(agentType: string) {
+  const rows = (await listAgentConfigs())
+    .filter((row) => row.agentType === agentType)
+  return rows.find((row) => row.isActive) ?? rows[0] ?? null
 }
 
 export async function createAgentConfig(values: typeof schema.agentConfigs.$inferInsert) {

@@ -361,7 +361,7 @@ async function tryAgentGridPrompt(
   mode: string,
   referenceLegend: string,
 ) {
-  const agent = createAgent('grid_prompt_generator', episodeId, dramaId)
+  const agent = await createAgent('grid_prompt_generator', episodeId, dramaId)
   if (!agent) return null
 
   const result = await agent.generate(

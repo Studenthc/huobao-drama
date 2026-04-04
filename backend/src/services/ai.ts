@@ -1,10 +1,12 @@
 /**
  * AI 服务抽象层 — 从数据库配置中获取 provider 和 API key
  */
-import { db, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
 import { logTaskProgress, logTaskWarn } from '../utils/task-logger.js'
 import { joinProviderUrl } from './adapters/url.js'
+import {
+  getAiServiceConfigById,
+  getPreferredActiveAiServiceConfig,
+} from '../db/repos/studio-configs.js'
 
 export type ServiceType = 'text' | 'image' | 'video' | 'audio'
 
@@ -33,14 +35,8 @@ export function getTextProviderBaseUrl(config: AIConfig) {
   return config.baseUrl
 }
 
-export function getActiveConfig(serviceType: ServiceType): AIConfig | null {
-  const rows = db.select().from(schema.aiServiceConfigs)
-    .where(eq(schema.aiServiceConfigs.serviceType, serviceType))
-    .all()
-    .filter(r => r.isActive)
-    .sort((a, b) => (b.priority || 0) - (a.priority || 0)) // 高优先级优先
-
-  const active = rows[0]
+export async function getActiveConfig(serviceType: ServiceType): Promise<AIConfig | null> {
+  const active = await getPreferredActiveAiServiceConfig(serviceType)
   if (!active) {
     logTaskWarn('AIConfig', 'active-config-missing', { serviceType })
     return null
@@ -62,29 +58,28 @@ export function getActiveConfig(serviceType: ServiceType): AIConfig | null {
   }
 }
 
-export function getTextConfig(): AIConfig {
-  const config = getActiveConfig('text')
+export async function getTextConfig(): Promise<AIConfig> {
+  const config = await getActiveConfig('text')
   if (!config) throw new Error('No active text AI config')
   return config
 }
 
-export function getAudioConfig(): AIConfig {
-  const config = getActiveConfig('audio')
+export async function getAudioConfig(): Promise<AIConfig> {
+  const config = await getActiveConfig('audio')
   if (!config) throw new Error('No active audio AI config — 请在设置中添加音频服务')
   return config
 }
 
-export function getAudioConfigById(id?: number | null): AIConfig {
+export async function getAudioConfigById(id?: number | null): Promise<AIConfig> {
   if (id) {
-    const config = getConfigById(id)
+    const config = await getConfigById(id)
     if (config) return config
   }
   return getAudioConfig()
 }
 
-export function getConfigById(id: number): AIConfig | null {
-  const [row] = db.select().from(schema.aiServiceConfigs)
-    .where(eq(schema.aiServiceConfigs.id, id)).all()
+export async function getConfigById(id: number): Promise<AIConfig | null> {
+  const row = await getAiServiceConfigById(id)
   if (!row || !row.isActive) {
     logTaskWarn('AIConfig', 'config-by-id-missing', { configId: id })
     return null
